@@ -1,0 +1,13 @@
+# Default config for E-con Sys Routecam after static IP set to S2X sensor subnet and password updated to nepi
+credentials:
+  username: x # None defined, but blanks don't work 
+  password: x # None defined, but blanks don't work
+
+network:
+  camera_ip: 192.168.0.41
+  camera_port: 8000 # Non-default port!
+
+idx_remappings:
+  Thresholding: ColorSaturation
+
+

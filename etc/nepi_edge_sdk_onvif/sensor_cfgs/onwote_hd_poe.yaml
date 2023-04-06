@@ -1,0 +1,8 @@
+# Default config for ONWOTE camera after static IP update to S2X sensor subnet
+credentials:
+  username: admin
+  password: admin
+
+network:
+  camera_ip: 192.168.0.33
+  camera_port: 80

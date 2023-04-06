@@ -1,0 +1,8 @@
+# Default config for Sidus SS400
+credentials:
+  username: admin
+  password: nepi
+
+network:
+  camera_ip: 192.168.0.150
+  camera_port: 80
