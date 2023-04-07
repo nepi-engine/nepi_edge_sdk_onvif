@@ -149,9 +149,9 @@ catkin_package(
 #)
 
 ## Mark other files for installation (e.g. launch and bag files, etc.)
-#install(DIRECTORY launch/
-#  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
-#)
+install(DIRECTORY launch/
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
+)
 
 catkin_install_python(PROGRAMS
   scripts/onvif_camera_node.py
