@@ -200,7 +200,21 @@ class OnvifCameraNode:
         
         onvif_resolution = self.resolution_mode_map[mode]
         rospy.loginfo(self.node_name + ": Setting resolution to " + str(onvif_resolution.Width) + "x" + str(onvif_resolution.Height))
-        return (self.driver.setResolution(onvif_resolution))
+        
+        # Experimental: Try stopping/restarting capture
+        img_acq_needs_restart = False
+        if self.driver.imageAcquisitionRunning(uri_index=self.img_uri_index) is True: 
+            self.img_uri_lock.acquire()
+            self.driver.stopImageAcquisition(uri_index=self.img_uri_index)
+            img_acq_needs_restart = True
+                    
+        ret, msg = self.driver.setResolution(onvif_resolution)
+        
+        if img_acq_needs_restart is True:
+            self.driver.startImageAcquisition(uri_index=self.img_uri_index)
+            self.img_uri_lock.release()
+
+        return ret, msg
     
     def setFramerateMode(self, mode):
         if (mode >= len(self.framerate_mode_map)):
