@@ -13,7 +13,7 @@ class OnvifCameraNode:
         # Launch the ROS node
         rospy.loginfo("Starting " + self.DEFAULT_NODE_NAME)
         rospy.init_node(self.DEFAULT_NODE_NAME) # Node name could be overridden via remapping
-        self.node_name = rospy.get_name()
+        self.node_name = rospy.get_name().split('/')[-1]
 
         # Require the camera connection parameters to have been set
         if not rospy.has_param('~credentials/username'):
@@ -131,7 +131,8 @@ class OnvifCameraNode:
 
         # Launch the IDX interface --  this takes care of initializing all the camera settings from config. file
         rospy.loginfo(self.node_name + ": Launching NEPI IDX (ROS) interface...")
-        self.idx_if = ROSIDXSensorIF(setResolutionModeCb=idx_callback_names["Resolution"], setFramerateModeCb=idx_callback_names["Framerate"], 
+        self.idx_if = ROSIDXSensorIF(sensor_name=self.node_name,
+                                     setResolutionModeCb=idx_callback_names["Resolution"], setFramerateModeCb=idx_callback_names["Framerate"], 
                                      setContrastCb=idx_callback_names["Contrast"], setBrightnessCb=idx_callback_names["Brightness"], 
                                      setThresholdingCb=idx_callback_names["Thresholding"], setRangeCb=idx_callback_names["Range"], 
                                      getColor2DImgCb=idx_callback_names["Color2DImg"], stopColor2DImgAcquisitionCb=idx_callback_names["StopColor2DImg"],
