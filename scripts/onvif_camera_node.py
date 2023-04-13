@@ -2,6 +2,7 @@
 
 import rospy
 import threading
+import cv2
 
 from nepi_edge_sdk_base.idx_sensor_if import ROSIDXSensorIF
 from nepi_edge_sdk_onvif.onvif_cam_driver import OnvifIFCamDriver
@@ -125,6 +126,7 @@ class OnvifCameraNode:
         self.img_uri_lock = threading.Lock()
         self.color_image_acquisition_running = False
         self.bw_image_acquisition_running = False
+        self.cached_2d_color_frame = None
 
         # Will hang forever waiting for the camera to be available
         rospy.loginfo(self.node_name + ": ... driver connected to camera")
@@ -222,6 +224,7 @@ class OnvifCameraNode:
         
         onvif_framerate = self.framerate_mode_map[mode]
         rospy.loginfo(self.node_name + ": Setting framerate to " + str(onvif_framerate) + "fps")
+        
         return (self.driver.setFramerate(onvif_framerate))
     
     def checkRatioBounds(self, ratio_val, has_auto_manual_setting = True):
@@ -292,13 +295,17 @@ class OnvifCameraNode:
             self.img_uri_lock.release()
             return ret, msg, None
         
-        self.color_img_acquisition_running = True
+        self.color_image_acquisition_running = True
         
         frame, ret, msg = self.driver.getImage(uri_index = self.img_uri_index)
         if ret is False:
             self.img_uri_lock.release()
             return ret, msg, None
         
+        # Make a copy for the bw thread to use rather than grabbing a new frame
+        if self.bw_image_acquisition_running:
+            self.cached_2d_color_frame = frame
+
         self.img_uri_lock.release()
         return ret, msg, frame
     
@@ -310,7 +317,8 @@ class OnvifCameraNode:
         else:
             ret = True
             msg = "Success"
-        self.color_img_acquisition_running = False
+        self.color_image_acquisition_running = False
+        self.cached_2d_color_frame = None
         self.img_uri_lock.release()
         return ret,msg
     
@@ -324,12 +332,24 @@ class OnvifCameraNode:
         
         self.bw_image_acquisition_running = True
 
-        frame, ret, msg = self.driver.getImage(uri_index = self.img_uri_index)
-        if ret is False:
-            self.img_uri_lock.release()
-            return ret, msg, None
-        
+        # Only grab a frame if we don't already have a cached color frame... avoids cutting the update rate in half when
+        # both image streams are running
+        if self.color_image_acquisition_running is False or self.cached_2d_color_frame is None:
+            #rospy.logwarn("Debugging: getBWImg acquiring")
+            frame, ret, msg = self.driver.getImage(uri_index = self.img_uri_index)
+        else:
+            #rospy.logwarn("Debugging: getBWImg reusing")
+            frame = self.cached_2d_color_frame.copy()
+            self.cached_2d_color_frame = None # Clear it to avoid using it multiple times in the event that threads are running at different rates
+            ret = True
+            msg = "Success: Reusing cached frame"
+
         self.img_uri_lock.release()
+
+        # Fix the channel count if necessary
+        if frame.ndim == 3:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
         return ret, msg, frame
     
     def stopBWImg(self):
