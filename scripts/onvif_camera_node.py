@@ -203,7 +203,7 @@ class OnvifCameraNode:
         onvif_resolution = self.resolution_mode_map[mode]
         rospy.loginfo(self.node_name + ": Setting resolution to " + str(onvif_resolution.Width) + "x" + str(onvif_resolution.Height))
         
-        # Experimental: Try stopping/restarting capture
+        # Stop and  restart capture... seems many cameras require this, so just make it the universal
         img_acq_needs_restart = False
         if self.driver.imageAcquisitionRunning(uri_index=self.img_uri_index) is True: 
             self.img_uri_lock.acquire()
@@ -213,7 +213,14 @@ class OnvifCameraNode:
         ret, msg = self.driver.setResolution(onvif_resolution)
         
         if img_acq_needs_restart is True:
-            self.driver.startImageAcquisition(uri_index=self.img_uri_index)
+            while img_acq_needs_restart is True:
+                ret, msg = self.driver.startImageAcquisition(uri_index=self.img_uri_index)
+                if ret is True:
+                    rospy.loginfo("Restarted image acquisition successfully")
+                    img_acq_needs_restart = False
+                else:
+                    rospy.logwarn("Failed to restart image acquisition: " + msg)
+                    rospy.sleep(1.0)
             self.img_uri_lock.release()
 
         return ret, msg
@@ -345,6 +352,10 @@ class OnvifCameraNode:
             msg = "Success: Reusing cached frame"
 
         self.img_uri_lock.release()
+
+        # Abort if there was some error or issue in acquiring the image
+        if ret is False or frame is None:
+            return False, msg, None
 
         # Fix the channel count if necessary
         if frame.ndim == 3:
