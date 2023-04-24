@@ -49,8 +49,13 @@ class OnvifIFCamDriver:
         # Debugging only
         #self.media_service.GetVideoEncoderConfigurations()))
         
-        self.encoder_options = self.media_service.GetVideoEncoderConfigurationOptions()
-        self.encoder_count = len(self.encoder_options)
+        #print("Debugging: Current encoder configurations = " + str(self.media_service.GetVideoEncoderConfigurations()))
+        
+        # Get the encoder options: Appears that you must query these for specific encoders -- providing no argument yields a much smaller set of options
+        # ... so just query the first encoder
+        video_encoder_token_param = {"ConfigurationToken":self.media_service.GetVideoEncoderConfigurations()[0]._token}
+        self.encoder_options = self.media_service.GetVideoEncoderConfigurationOptions(video_encoder_token_param)
+        self.encoder_count = len(self.encoder_options) # Will just allow the primary (first) encoder for now
         #print("Debugging: Encoder Options = " + str(self.encoder_options))
 
         # Get the available media profiles
