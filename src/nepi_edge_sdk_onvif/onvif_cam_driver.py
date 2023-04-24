@@ -2,6 +2,8 @@
 
 import time
 import cv2
+import threading
+import os
 from onvif import ONVIFCamera # python-onvif
 
 # Utilities
@@ -63,11 +65,18 @@ class OnvifIFCamDriver:
         # And query the RTSP URLs for each
         self.rtsp_uris = []
         self.rtsp_caps = []
+        self.img_uri_locks = []
+        self.latest_frames = []
+        self.latest_frame_successes = []
         for p in self.profiles:
             params = {"StreamSetup":{"Stream":"RTP-Unicast", "Transport":{"Protocol":"RTSP"}}, "ProfileToken":p._token}
             uri = self.media_service.GetStreamUri(params).Uri
             self.rtsp_uris.append(uri)
             self.rtsp_caps.append(None) # Empty until streaming is started
+            self.img_uri_locks.append(threading.Lock())
+            self.latest_frames.append(None)
+            self.latest_frame_successes.append(False)
+
         #print("Debugging: RTSP URIs = " + str(self.rtsp_uris))
         self.consec_failed_frames = {}
 
@@ -81,10 +90,18 @@ class OnvifIFCamDriver:
         if uri_index < 0 or uri_index > len(self.rtsp_uris) - 1:
             return False, "Invalid URI index: " + str(uri_index)
         
+        self.img_uri_locks[uri_index].acquire()
         if self.rtsp_caps[uri_index] != None:
+            self.img_uri_locks[uri_index].release()
             return True, "Already capturing from " + self.rtsp_uris[uri_index]
-                
-        self.rtsp_caps[uri_index] = cv2.VideoCapture(self.rtsp_uris[uri_index])
+        
+        # Create the OpenCV using FFMPEG as the backend API -- appears that the default anyway, but just force it here
+        self.rtsp_caps[uri_index] = cv2.VideoCapture(self.rtsp_uris[uri_index], cv2.CAP_FFMPEG)
+        
+        # Doesn't seem to work with this GStreamer API instead -- just blocks forever on image acq
+        # self.rtsp_caps[uri_index] = cv2.VideoCapture(self.rtsp_uris[uri_index], cv2.CAP_GSTREAMER) 
+        
+        #print("!!!!!!!! Debug: Backend is " + self.rtsp_caps[uri_index].getBackendName() + "!!!!!!!")
         if not self.rtsp_caps[uri_index].isOpened():
             # Try adding username and password to URI per RTSP standards
             uri_pre = self.rtsp_uris[uri_index].split('//')[0]
@@ -92,22 +109,61 @@ class OnvifIFCamDriver:
             secure_uri = uri_pre + self.username + ":" + self.password + "@" + uri_post
             self.rtsp_caps[uri_index] = cv2.VideoCapture(secure_uri)
             if not self.rtsp_caps[uri_index].isOpened():
+                self.rtsp_caps[uri_index].release()
+                self.rtsp_caps[uri_index] = None
+                self.img_uri_locks[uri_index].release()
                 return False, "Failed to start capture from " + self.rtsp_uris[uri_index] + " or " + secure_uri
             # But if it worked, just update the URI
             self.rtsp_uris[uri_index] = secure_uri
+                
+        # Experimental: Try setting a small buffer size for reduced latency
+        self.rtsp_caps[uri_index].set(cv2.CAP_PROP_BUFFERSIZE, 3) # Don't think this does anything
+
+        self.img_uri_locks[uri_index].release()
+        self.latest_frames[uri_index] = None
+        self.latest_frame_successes[uri_index] = False
+        # Experimental: Launch a separate thread to grab frames as quickly as possible so that the buffer is empty when downstream
+        # client actually wants a real image
+        self.img_acq_thread = threading.Thread(target=self.runImgAcqThread, args=[uri_index])
+        self.img_acq_thread.daemon = True
+        self.img_acq_thread.start()
         
         self.consec_failed_frames[uri_index] = 0
         return True, "Success"
+
+    def runImgAcqThread(self, uri_index):
+        if uri_index < 0 or uri_index > len(self.rtsp_uris) - 1:
+            return
+
+        if self.rtsp_caps[uri_index] is None or self.rtsp_caps[uri_index].isOpened() is False:
+            return
         
+        keep_going = True
+        while(keep_going):
+            self.img_uri_locks[uri_index].acquire()
+            if self.rtsp_caps[uri_index] is None:
+                keep_going = False
+            else:
+                # Acquire without decoding via grab(). Image is available via a subsequent retrieve()
+                self.latest_frame_successes[uri_index] = self.rtsp_caps[uri_index].grab() 
+                                
+            self.img_uri_locks[uri_index].release()
+
+
+            time.sleep(0.01)
+    
     def stopImageAcquisition(self, uri_index = 0):
         if uri_index < 0 or uri_index > len(self.rtsp_uris) - 1:
             return False, "Invalid URI index: " + str(uri_index)
         
+        self.img_uri_locks[uri_index].acquire()
         if self.rtsp_caps[uri_index] == None:
+            self.img_uri_locks[uri_index].release()
             return True, "No current capture from " + self.rtsp_uris[uri_index]
         
         self.rtsp_caps[uri_index].release()
         self.rtsp_caps[uri_index] = None
+        self.img_uri_locks[uri_index].release()
         return True, "Success"
     
     def getImage(self, uri_index = 0):
@@ -115,9 +171,18 @@ class OnvifIFCamDriver:
             return None, False, "Invalid URI index: " + str(uri_index)
 
         if self.rtsp_caps[uri_index] is None or self.rtsp_caps[uri_index].isOpened() is False:
-            return None, False, "Capture for " + self.rtsp_uris[uri_index] + " not opened"
+           return None, False, "Capture for " + self.rtsp_uris[uri_index] + " not opened"
         
-        ret, frame = self.rtsp_caps[uri_index].read()
+        #ret, frame = self.rtsp_caps[uri_index].read()
+        
+        # Experimental -- Just decode and return latest grabbed by acquisition thread
+        self.img_uri_locks[uri_index].acquire()
+        if self.latest_frame_successes[uri_index] is True:
+            ret, self.latest_frames[uri_index] = self.rtsp_caps[uri_index].retrieve()
+        else:
+            ret = False
+            self.latest_frames[uri_index] = None
+        self.img_uri_locks[uri_index].release()
         if not ret:
             self.consec_failed_frames[uri_index] += 1
             if self.consec_failed_frames < self.MAX_CONSEC_FRAME_FAIL_COUNT:
@@ -127,7 +192,7 @@ class OnvifIFCamDriver:
                 self.startImageAcquisition(uri_index)
                 return None, False, "Failed to read next frame " + str(self.MAX_CONSEC_FRAME_FAIL_COUNT) + "times consec... auto-restarting image acquisition"
         
-        return frame, True, "Success"
+        return self.latest_frames[uri_index], True, "Success"
     
     def getCompressionType(self, video_encoder_id=0):
         if self.encoder_count == 0:
