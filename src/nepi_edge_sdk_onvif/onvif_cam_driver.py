@@ -80,6 +80,14 @@ class OnvifIFCamDriver:
         #print("Debugging: RTSP URIs = " + str(self.rtsp_uris))
         self.consec_failed_frames = {}
 
+        # Ensure that we use UDP for image transport via the FFMPEG API Backend to cv2.VideoCapture
+        #os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;udp"
+        # Testing: Seems TCP better in terms of reducing decode errors, but what is the framerate/latency cost?
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+
+    def reportDeviceInfo(self):
+        return self.device_info
+
     def imageAcquisitionRunning(self, uri_index = 0):
         if uri_index < 0 or uri_index > len(self.rtsp_uris) - 1:
             return False
@@ -307,6 +315,8 @@ class OnvifIFCamDriver:
             return {}, encoder_cfg 
 
         range = self.encoder_options[compression_type].FrameRateRange
+        
+        #TODO: Framerate range can be a function of resolution, as ONWOTE camera displays in its encoder_cfg_extensions. How to handle?
         return range, encoder_cfg  
     
     def getFramerate(self, video_encoder_id=0):
@@ -336,7 +346,7 @@ class OnvifIFCamDriver:
         
         # Check whether we need to make a change
         if max_fps == encoder_cfg.RateControl.FrameRateLimit:
-            return True, "Desired resolution already set"
+            return True, "Desired framerate already set"
         
         encoder_cfg.RateControl.FrameRateLimit = max_fps
         request = self.media_service.create_type('SetVideoEncoderConfiguration')
