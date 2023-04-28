@@ -53,10 +53,17 @@ class OnvifIFCamDriver:
         
         #print("Debugging: Current encoder configurations = " + str(self.media_service.GetVideoEncoderConfigurations()))
         
-        # Get the encoder options: Appears that you must query these for specific encoders -- providing no argument yields a much smaller set of options
-        # ... so just query the first encoder
-        video_encoder_token_param = {"ConfigurationToken":self.media_service.GetVideoEncoderConfigurations()[0]._token}
-        self.encoder_options = self.media_service.GetVideoEncoderConfigurationOptions(video_encoder_token_param)
+        # Get the encoder options
+        # First time is just to get the count to see if encoder configuration is supported
+        try:
+            # Appears that you must query these for specific encoders -- providing no ConfigurationToken argument yields a much smaller set of options
+            # ... so just query the first encoder
+            video_encoder_token_param = {"ConfigurationToken":self.media_service.GetVideoEncoderConfigurations()[0]._token}
+            self.encoder_options = self.media_service.GetVideoEncoderConfigurationOptions(video_encoder_token_param)
+        except:
+            # Probably "list index 0 out of range" due to no encoder configurations for this camera... that's okay, just means no framerate or resolution adj.
+            self.encoder_options = []
+        
         self.encoder_count = len(self.encoder_options) # Will just allow the primary (first) encoder for now
         #print("Debugging: Encoder Options = " + str(self.encoder_options))
 
