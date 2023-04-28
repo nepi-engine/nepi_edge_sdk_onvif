@@ -92,6 +92,12 @@ class OnvifIFCamDriver:
         # Testing: Seems TCP better in terms of reducing decode errors, but what is the framerate/latency cost?
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
+        # Start and stop the acquisition to "prime" it (seems to help with initial-frame decoding errors) and ensure that the RTSP server is actually reachable
+        ret, msg = self.startImageAcquisition(0)
+        if ret is False:
+            raise RuntimeError("Failed to prime image acquisition: " + msg)
+        self.stopImageAcquisition(0)
+
     def reportDeviceInfo(self):
         return self.device_info
 
