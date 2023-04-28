@@ -37,12 +37,16 @@ class OnvifCameraNode:
 
         # Start the driver to connect to the camera
         rospy.loginfo(self.node_name + ": Launching driver... ")
-        try:
-            self.driver = OnvifIFCamDriver(username, password, camera_ip, onvif_port)
-        except Exception as e:
-            rospy.logerr("Failed to instantiate OnvifIFCamDriver... bad credentials?: " + str(e))
-            return
+        while not rospy.is_shutdown():
+            try:
+                self.driver = OnvifIFCamDriver(username, password, camera_ip, onvif_port)
+                break
+            except Exception as e:
+                # Only log the error every 30 seconds -- don't want to fill up log in the case that the camera simply isn't attached.
+                rospy.logerr_throttle(30, self.node_name + ": Failed to instantiate OnvifIFCamDriver... camera not online? bad credentials?: " + str(e))
+                rospy.sleep(1)
 
+        rospy.loginfo(self.node_name + ": ... Connected!")        
         # Configurable IDX parameter and data output remapping to support specific camera needs/capabilities
         # Don't edit this table directly -- do it through idx_remapping parameters
         idx_callback_names = {
