@@ -98,7 +98,7 @@ class OnvifIFCamDriver:
             raise RuntimeError("Failed to prime image acquisition: " + msg)
         self.stopImageAcquisition(0)
 
-    def reportDeviceInfo(self):
+    def getDeviceInfo(self):
         return self.device_info
 
     def imageAcquisitionRunning(self, uri_index = 0):
@@ -215,14 +215,14 @@ class OnvifIFCamDriver:
         
         return self.latest_frames[uri_index], True, "Success"
     
-    def getCompressionType(self, video_encoder_id=0):
+    def getEncoding(self, video_encoder_id=0):
         if self.encoder_count == 0:
             return "", None
         
         encoder_cfg = self.media_service.GetVideoEncoderConfigurations()[video_encoder_id]
-        compression_type = encoder_cfg["Encoding"]
+        encoding = encoder_cfg["Encoding"]
         #print("Debugging: Encoder cfg = " + str(encoder_cfg))
-        return compression_type, encoder_cfg
+        return encoding, encoder_cfg
      
     def hasAdjustableResolution(self):
         resolutions, _ = self.getAvailableResolutions()
@@ -264,13 +264,13 @@ class OnvifIFCamDriver:
             return [], None
         
         # First, figure out what compression format is available for this encoder
-        compression_type, encoder_cfg = self.getCompressionType(video_encoder_id)
+        encoding, encoder_cfg = self.getEncoding(video_encoder_id)
                         
-        if not hasattr(self.encoder_options, compression_type):
+        if not hasattr(self.encoder_options, encoding):
             return [], encoder_cfg
 
         # Now figure out which resolutions are available for this compression... just use the member variable since "options" don't change
-        available_resolutions = self.encoder_options[compression_type].ResolutionsAvailable
+        available_resolutions = self.encoder_options[encoding].ResolutionsAvailable
         # available_resolution: List of dictionaries: [{Width:x,Height:y}, ...]
         return available_resolutions, encoder_cfg # Convenient to return the encoder config, too
         
@@ -322,12 +322,12 @@ class OnvifIFCamDriver:
             return {}, None
         
         # First, figure out what compression format is available for this encoder
-        compression_type, encoder_cfg = self.getCompressionType(video_encoder_id)
+        encoding, encoder_cfg = self.getEncoding(video_encoder_id)
                 
-        if not hasattr(self.encoder_options, compression_type):
+        if not hasattr(self.encoder_options, encoding):
             return {}, encoder_cfg 
 
-        range = self.encoder_options[compression_type].FrameRateRange
+        range = self.encoder_options[encoding].FrameRateRange
         
         #TODO: Framerate range can be a function of resolution, as ONWOTE camera displays in its encoder_cfg_extensions. How to handle?
         return range, encoder_cfg  
