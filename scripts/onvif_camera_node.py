@@ -5,10 +5,14 @@ import threading
 import cv2
 
 from nepi_edge_sdk_base.idx_sensor_if import ROSIDXSensorIF
-from nepi_edge_sdk_onvif.onvif_cam_driver import OnvifIFCamDriver
+from nepi_edge_sdk_onvif.onvif_cam_driver import ONVIF_GENERIC_DRIVER_ID, OnvifIFCamDriver
+from nepi_edge_sdk_onvif.econ_routecam_driver import ECON_ROUTECAM_DRIVER_ID, EConRouteCamDriver
 
 class OnvifCameraNode:
     DEFAULT_NODE_NAME = "onvif_camera_node"
+
+    DRIVER_SPECIALIZATION_CONSTRUCTORS = {ONVIF_GENERIC_DRIVER_ID: OnvifIFCamDriver,
+                                          ECON_ROUTECAM_DRIVER_ID: EConRouteCamDriver}
 
     def __init__(self):
         # Launch the ROS node
@@ -35,18 +39,28 @@ class OnvifCameraNode:
         onvif_port = rospy.get_param('~network/camera_port', 80)
         rospy.set_param('~/network/camera_port', onvif_port)
 
+        # Set up for specialized drivers here
+        self.driver_id = rospy.get_param('~driver_id', ONVIF_GENERIC_DRIVER_ID)
+        rospy.set_param('~driver_id', self.driver_id)
+        if self.driver_id not in self.DRIVER_SPECIALIZATION_CONSTRUCTORS:
+            rospy.logerr(self.node_name + ": unknown driver_id " + self.driver_id)
+            return
+        DriverConstructor = self.DRIVER_SPECIALIZATION_CONSTRUCTORS[self.driver_id]
+
         # Start the driver to connect to the camera
-        rospy.loginfo(self.node_name + ": Launching driver... ")
+        rospy.loginfo(self.node_name + ": Launching " + self.driver_id + " driver")
         while not rospy.is_shutdown():
             try:
-                self.driver = OnvifIFCamDriver(username, password, camera_ip, onvif_port)
+                self.driver = DriverConstructor(username, password, camera_ip, onvif_port)
                 break
             except Exception as e:
                 # Only log the error every 30 seconds -- don't want to fill up log in the case that the camera simply isn't attached.
                 rospy.logerr_throttle(30, self.node_name + ": Failed to instantiate OnvifIFCamDriver... camera not online? bad credentials?: " + str(e))
                 rospy.sleep(1)
 
-        rospy.loginfo(self.node_name + ": ... Connected!")        
+        rospy.loginfo(self.node_name + ": ... Connected!")
+        self.dev_info = self.driver.getDeviceInfo()
+        self.logDeviceInfo()        
         # Configurable IDX parameter and data output remapping to support specific camera needs/capabilities
         # Don't edit this table directly -- do it through idx_remapping parameters
         idx_callback_names = {
@@ -154,7 +168,14 @@ class OnvifCameraNode:
 
         # Now start the node
         rospy.spin()
-        
+
+    def logDeviceInfo(self):
+        dev_info_string = self.node_name + " Device Info:\n"
+        dev_info_string += "Manufacturer: " + self.dev_info["Manufacturer"] + "\n"
+        dev_info_string += "Model: " + self.dev_info["Model"] + "\n"
+        dev_info_string += "Firmware Version: " + self.dev_info["FirmwareVersion"] + "\n"
+        dev_info_string += "Serial Number: " + self.dev_info["HardwareId"] + "\n"
+                
     def createResolutionModeMapping(self):
         available_resolutions, _ = self.driver.getAvailableResolutions(video_encoder_id=0) # TODO: Configurable encoder selection? Multiples?
         # Check if this camera supports resolution adjustment
@@ -205,7 +226,7 @@ class OnvifCameraNode:
             return False, "Invalid mode value"
         
         onvif_resolution = self.resolution_mode_map[mode]
-        rospy.loginfo(self.node_name + ": Setting resolution to " + str(onvif_resolution.Width) + "x" + str(onvif_resolution.Height))
+        rospy.loginfo(self.node_name + ": Setting resolution to " + str(onvif_resolution['Width']) + "x" + str(onvif_resolution['Height']))
         
         # Stop and  restart capture... seems many cameras require this, so just make it the universal
         img_acq_needs_restart = False
