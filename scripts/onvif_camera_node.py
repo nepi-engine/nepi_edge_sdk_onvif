@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-
+import time
 import rospy
 import threading
 import cv2
@@ -145,6 +145,7 @@ class OnvifCameraNode:
         self.color_image_acquisition_running = False
         self.bw_image_acquisition_running = False
         self.cached_2d_color_frame = None
+        self.cached_2d_color_frame_timestamp = None
 
         # Will hang forever waiting for the camera to be available
         rospy.loginfo(self.node_name + ": ... driver connected to camera")
@@ -325,21 +326,32 @@ class OnvifCameraNode:
         ret, msg = self.driver.startImageAcquisition(uri_index = self.img_uri_index)
         if ret is False:
             self.img_uri_lock.release()
-            return ret, msg, None
+            return ret, msg, None, None
         
         self.color_image_acquisition_running = True
+
+        timestamp = None
         
-        frame, ret, msg = self.driver.getImage(uri_index = self.img_uri_index)
+        start = time.time()
+        frame, timestamp, ret, msg = self.driver.getImage(uri_index = self.img_uri_index)
+        stop = time.time()
+        #print('GI: ', stop - start)
         if ret is False:
             self.img_uri_lock.release()
-            return ret, msg, None
+            return ret, msg, None, None
+        
+        if timestamp is not None:
+            ros_timestamp = rospy.Time.from_sec(timestamp)
+        else:
+            ros_timestamp = rospy.Time.now()
         
         # Make a copy for the bw thread to use rather than grabbing a new frame
         if self.bw_image_acquisition_running:
             self.cached_2d_color_frame = frame
+            self.cached_2d_color_frame_timestamp = ros_timestamp
 
         self.img_uri_lock.release()
-        return ret, msg, frame
+        return ret, msg, frame, ros_timestamp
     
     def stopColorImg(self):
         self.img_uri_lock.acquire()
@@ -351,6 +363,7 @@ class OnvifCameraNode:
             msg = "Success"
         self.color_image_acquisition_running = False
         self.cached_2d_color_frame = None
+        self.cached_2d_color_frame_timestamp = None
         self.img_uri_lock.release()
         return ret,msg
     
@@ -360,19 +373,27 @@ class OnvifCameraNode:
         ret, msg = self.driver.startImageAcquisition(uri_index = self.img_uri_index)
         if ret is False:
             self.img_uri_lock.release()
-            return ret, msg, None
+            return ret, msg, None, None
         
         self.bw_image_acquisition_running = True
 
+        ros_timestamp = None
+        
         # Only grab a frame if we don't already have a cached color frame... avoids cutting the update rate in half when
         # both image streams are running
         if self.color_image_acquisition_running is False or self.cached_2d_color_frame is None:
             #rospy.logwarn("Debugging: getBWImg acquiring")
-            frame, ret, msg = self.driver.getImage(uri_index = self.img_uri_index)
+            frame, timestamp, ret, msg = self.driver.getImage(uri_index = self.img_uri_index)
+            if timestamp is not None:
+                ros_timestamp = rospy.Time.from_sec(timestamp)
+            else:
+                ros_timestamp = rospy.Time.now()
         else:
             #rospy.logwarn("Debugging: getBWImg reusing")
             frame = self.cached_2d_color_frame.copy()
+            ros_timestamp = self.cached_2d_color_frame_timestamp
             self.cached_2d_color_frame = None # Clear it to avoid using it multiple times in the event that threads are running at different rates
+            self.cached_2d_color_frame_timestamp = None
             ret = True
             msg = "Success: Reusing cached frame"
 
@@ -380,13 +401,13 @@ class OnvifCameraNode:
 
         # Abort if there was some error or issue in acquiring the image
         if ret is False or frame is None:
-            return False, msg, None
+            return False, msg, None, None
 
         # Fix the channel count if necessary
         if frame.ndim == 3:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        return ret, msg, frame
+        return ret, msg, frame, ros_timestamp
     
     def stopBWImg(self):
         self.img_uri_lock.acquire()

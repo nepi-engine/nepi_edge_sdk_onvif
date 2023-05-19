@@ -76,6 +76,7 @@ class OnvifIFCamDriver(object):
         self.rtsp_caps = []
         self.img_uri_locks = []
         self.latest_frames = []
+        self.latest_frame_timestamps = []
         self.latest_frame_successes = []
         for p in self.profiles:
             params = {"StreamSetup":{"Stream":"RTP-Unicast", "Transport":{"Protocol":"RTSP"}}, "ProfileToken":p._token}
@@ -84,6 +85,7 @@ class OnvifIFCamDriver(object):
             self.rtsp_caps.append(None) # Empty until streaming is started
             self.img_uri_locks.append(threading.Lock())
             self.latest_frames.append(None)
+            self.latest_frame_timestamps.append(None)
             self.latest_frame_successes.append(False)
 
         #print("Debugging: RTSP URIs = " + str(self.rtsp_uris))
@@ -144,6 +146,7 @@ class OnvifIFCamDriver(object):
 
         self.img_uri_locks[uri_index].release()
         self.latest_frames[uri_index] = None
+        self.latest_frame_timestamps[uri_index] = None
         self.latest_frame_successes[uri_index] = False
         # Experimental: Launch a separate thread to grab frames as quickly as possible so that the buffer is empty when downstream
         # client actually wants a real image
@@ -168,7 +171,11 @@ class OnvifIFCamDriver(object):
                 keep_going = False
             else:
                 # Acquire without decoding via grab(). Image is available via a subsequent retrieve()
-                self.latest_frame_successes[uri_index] = self.rtsp_caps[uri_index].grab() 
+                start = time.time()
+                self.latest_frame_successes[uri_index] = self.rtsp_caps[uri_index].grab()
+                self.latest_frame_timestamps[uri_index] = time.time()
+                stop = self.latest_frame_timestamps[uri_index]
+                #print('G: ', stop - start)
                                 
             self.img_uri_locks[uri_index].release()
 
@@ -191,17 +198,20 @@ class OnvifIFCamDriver(object):
     
     def getImage(self, uri_index = 0):
         if uri_index < 0 or uri_index > len(self.rtsp_uris) - 1:
-            return None, False, "Invalid URI index: " + str(uri_index)
+            return None, None, False, "Invalid URI index: " + str(uri_index)
 
         if self.rtsp_caps[uri_index] is None or self.rtsp_caps[uri_index].isOpened() is False:
-           return None, False, "Capture for " + self.rtsp_uris[uri_index] + " not opened"
+           return None, None, False, "Capture for " + self.rtsp_uris[uri_index] + " not opened"
         
         #ret, frame = self.rtsp_caps[uri_index].read()
         
         # Experimental -- Just decode and return latest grabbed by acquisition thread
         self.img_uri_locks[uri_index].acquire()
         if self.latest_frame_successes[uri_index] is True:
+            start = time.time()
             ret, self.latest_frames[uri_index] = self.rtsp_caps[uri_index].retrieve()
+            stop = time.time()
+            #print('R: ', stop - start)
         else:
             ret = False
             self.latest_frames[uri_index] = None
@@ -209,13 +219,13 @@ class OnvifIFCamDriver(object):
         if not ret:
             self.consec_failed_frames[uri_index] += 1
             if self.consec_failed_frames < self.MAX_CONSEC_FRAME_FAIL_COUNT:
-                return None, False, "Failed to read next frame for " + self.rtsp_uris[uri_index]
+                return None, None, False, "Failed to read next frame for " + self.rtsp_uris[uri_index]
             else:
                 self.stopImageAcquisition(uri_index)
                 self.startImageAcquisition(uri_index)
-                return None, False, "Failed to read next frame " + str(self.MAX_CONSEC_FRAME_FAIL_COUNT) + "times consec... auto-restarting image acquisition"
+                return None, None, False, "Failed to read next frame " + str(self.MAX_CONSEC_FRAME_FAIL_COUNT) + "times consec... auto-restarting image acquisition"
         
-        return self.latest_frames[uri_index], True, "Success"
+        return self.latest_frames[uri_index], self.latest_frame_timestamps[uri_index], True, "Success"
     
     def getEncoding(self, video_encoder_id=0):
         if self.encoder_count == 0:
