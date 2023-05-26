@@ -7,7 +7,16 @@ network:
   camera_ip: 192.168.0.41
   camera_port: 8000 # Non-default port!
 
+idx: 
+  brightness: 0.5
+  contrast: 0.5
+  resolution_mode: 1
+  thresholding: 0.5
+
 idx_remappings:
   Thresholding: ColorSaturation
 
 driver_id: EConRouteCam
+
+save_data_continuous: false
+save_data_raw: false
