@@ -176,6 +176,7 @@ class OnvifCameraNode:
         dev_info_string += "Model: " + self.dev_info["Model"] + "\n"
         dev_info_string += "Firmware Version: " + self.dev_info["FirmwareVersion"] + "\n"
         dev_info_string += "Serial Number: " + self.dev_info["HardwareId"] + "\n"
+        rospy.loginfo(dev_info_string)
                 
     def createResolutionModeMapping(self):
         available_resolutions, _ = self.driver.getAvailableResolutions(video_encoder_id=0) # TODO: Configurable encoder selection? Multiples?
@@ -229,6 +230,7 @@ class OnvifCameraNode:
         onvif_resolution = self.resolution_mode_map[mode]
         rospy.loginfo(self.node_name + ": Setting resolution to " + str(onvif_resolution['Width']) + "x" + str(onvif_resolution['Height']))
         
+        # TODO: Stop and restart as part of the driver method, not here in the ROS node
         # Stop and  restart capture... seems many cameras require this, so just make it the universal
         img_acq_needs_restart = False
         if self.driver.imageAcquisitionRunning(uri_index=self.img_uri_index) is True: 
