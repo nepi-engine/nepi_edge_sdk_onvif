@@ -45,7 +45,7 @@ class OnvifIFCamDriver(object):
         self.video_source = self.media_service.GetVideoSources()[0]
 
         # And the imaging settings (brightness, saturation, etc.) and options associated with this video source
-        video_src_token_param = {"VideoSourceToken":self.video_source._token}
+        video_src_token_param = {"VideoSourceToken":self.video_source.token}
         #self.imaging_settings = self.imaging_service.GetImagingSettings(video_src_token_param)
         self.imaging_options = self.imaging_service.GetOptions(video_src_token_param)
         #print("Debugging: Imaging Options = " + str(self.imaging_options))
@@ -60,7 +60,7 @@ class OnvifIFCamDriver(object):
         try:
             # Appears that you must query these for specific encoders -- providing no ConfigurationToken argument yields a much smaller set of options
             # ... so just query the first encoder
-            video_encoder_token_param = {"ConfigurationToken":self.media_service.GetVideoEncoderConfigurations()[0]._token}
+            video_encoder_token_param = {"ConfigurationToken":self.media_service.GetVideoEncoderConfigurations()[0].token}
             self.encoder_options = self.media_service.GetVideoEncoderConfigurationOptions(video_encoder_token_param)
         except:
             # Probably "list index 0 out of range" due to no encoder configurations for this camera... that's okay, just means no framerate or resolution adj.
@@ -79,7 +79,7 @@ class OnvifIFCamDriver(object):
         self.latest_frame_timestamps = []
         self.latest_frame_successes = []
         for p in self.profiles:
-            params = {"StreamSetup":{"Stream":"RTP-Unicast", "Transport":{"Protocol":"RTSP"}}, "ProfileToken":p._token}
+            params = {"StreamSetup":{"Stream":"RTP-Unicast", "Transport":{"Protocol":"RTSP"}}, "ProfileToken":p.token}
             uri = self.media_service.GetStreamUri(params).Uri
             self.rtsp_uris.append(uri)
             self.rtsp_caps.append(None) # Empty until streaming is started
@@ -218,7 +218,7 @@ class OnvifIFCamDriver(object):
         self.img_uri_locks[uri_index].release()
         if not ret:
             self.consec_failed_frames[uri_index] += 1
-            if self.consec_failed_frames < self.MAX_CONSEC_FRAME_FAIL_COUNT:
+            if self.consec_failed_frames[uri_index] < self.MAX_CONSEC_FRAME_FAIL_COUNT:
                 return None, None, False, "Failed to read next frame for " + self.rtsp_uris[uri_index]
             else:
                 self.stopImageAcquisition(uri_index)
@@ -315,10 +315,11 @@ class OnvifIFCamDriver(object):
 
         # Update the encoder_cfg
         encoder_cfg.Resolution = resolution
-
+        
         # Create the request
         request = self.media_service.create_type('SetVideoEncoderConfiguration')
         request.Configuration = encoder_cfg
+        request.ForcePersistence = False
         self.media_service.SetVideoEncoderConfiguration(request)
 
         # Check
@@ -376,15 +377,16 @@ class OnvifIFCamDriver(object):
         encoder_cfg.RateControl.FrameRateLimit = max_fps
         request = self.media_service.create_type('SetVideoEncoderConfiguration')
         request.Configuration = encoder_cfg
+        request.ForcePersistence = False
         try:
             self.media_service.SetVideoEncoderConfiguration(request)
         except Exception as e:
-            return False, "Onvif Error: Failed to set the frame rate to " + str(max_fps) + " - " + e.what()
+            return False, "Onvif Error: Failed to set the frame rate to " + str(max_fps) + " - " + str(e)
         
         # Create an update param set and submit
-        #update_params = {"token":encoder_cfg._token, "RateControl":{"FrameRateLimit":max_fps}}
+        #update_params = {"token":encoder_cfg.token, "RateControl":{"FrameRateLimit":max_fps}}
         # Just testing
-        #update_params = {"Configuration": {"token":encoder_cfg._token}}
+        #update_params = {"Configuration": {"token":encoder_cfg.token}}
         #self.media_service.SetVideoEncoderConfiguration(update_params)
 
         if readback_check is True:
@@ -396,7 +398,7 @@ class OnvifIFCamDriver(object):
 
     def getScaledImageSetting(self, onvif_setting_name, onvif_setting_subname=None):
         # Make sure to query the system first
-        video_src_token_param = {"VideoSourceToken":self.video_source._token}
+        video_src_token_param = {"VideoSourceToken":self.video_source.token}
         imaging_settings = self.imaging_service.GetImagingSettings(video_src_token_param)
 
         if not hasattr(imaging_settings, onvif_setting_name):
@@ -412,7 +414,7 @@ class OnvifIFCamDriver(object):
             return False, "Invalid scaled value for " + onvif_setting_name
 
         # Make sure to query the system first
-        video_src_token_param = {"VideoSourceToken":self.video_source._token}
+        video_src_token_param = {"VideoSourceToken":self.video_source.token}
         imaging_settings = self.imaging_service.GetImagingSettings(video_src_token_param)
         #print("Debugging: Imaging Settings: ")
         #print(imaging_settings)
@@ -425,11 +427,11 @@ class OnvifIFCamDriver(object):
         if unscaled == imaging_settings[onvif_setting_name]:
             return True, "Success: Desired " + onvif_setting_name + " already set"
         
-        new_imaging_settings = {"VideoSourceToken":self.video_source._token, "ImagingSettings":{onvif_setting_name: unscaled}}
+        new_imaging_settings = {"VideoSourceToken":self.video_source.token, "ImagingSettings":{onvif_setting_name: unscaled}}
         try:
             self.imaging_service.SetImagingSettings(new_imaging_settings)
         except Exception as e:
-            return False, "Onvif error: Failed to update " + onvif_setting_name + " - " + e.what()
+            return False, "Onvif error: Failed to update " + onvif_setting_name + " - " + str(e)()
         
         if readback_check is True:
             unscaled_readback = self.imaging_service.GetImagingSettings(video_src_token_param)[onvif_setting_name]
@@ -442,7 +444,7 @@ class OnvifIFCamDriver(object):
 
     def getEnabledAndScaledImageSetting(self, onvif_setting_name, onvif_setting_enabled_name, onvif_setting_enabled_val, onvif_setting_level_name):
         # Make sure to query the system first
-        video_src_token_param = {"VideoSourceToken":self.video_source._token}
+        video_src_token_param = {"VideoSourceToken":self.video_source.token}
         imaging_settings = self.imaging_service.GetImagingSettings(video_src_token_param)
 
         if not hasattr(imaging_settings, onvif_setting_name):
@@ -463,7 +465,7 @@ class OnvifIFCamDriver(object):
             return False, "Invalid scaled value for " + onvif_setting_name + "." + onvif_setting_level_name
         
         # Make sure to query the system first
-        video_src_token_param = {"VideoSourceToken":self.video_source._token}
+        video_src_token_param = {"VideoSourceToken":self.video_source.token}
         imaging_settings = self.imaging_service.GetImagingSettings(video_src_token_param)
         
         if not hasattr(imaging_settings, onvif_setting_name):
@@ -472,11 +474,11 @@ class OnvifIFCamDriver(object):
         unscaled = computeUnscaledFromScaled(onvif_setting_level_scaled_val, 
                                              self.imaging_options[onvif_setting_name][onvif_setting_level_name].Min, 
                                              self.imaging_options[onvif_setting_name][onvif_setting_level_name].Max, force_integer)
-        new_imaging_settings = {"VideoSourceToken":self.video_source._token, "ImagingSettings":{onvif_setting_name: {onvif_setting_enabled_name: onvif_setting_enabled_val, onvif_setting_level_name: unscaled}}}
+        new_imaging_settings = {"VideoSourceToken":self.video_source.token, "ImagingSettings":{onvif_setting_name: {onvif_setting_enabled_name: onvif_setting_enabled_val, onvif_setting_level_name: unscaled}}}
         try:
             self.imaging_service.SetImagingSettings(new_imaging_settings)
         except Exception as e:
-            return False, "Onvif error: Failed to update " + onvif_setting_name + " - " + e.what()
+            return False, "Onvif error: Failed to update " + onvif_setting_name + " - " + str(e)()
 
         if readback_check is True:
            unscaled_readback = self.imaging_service.GetImagingSettings(video_src_token_param)[onvif_setting_name]
@@ -534,7 +536,7 @@ class OnvifIFCamDriver(object):
     
     def getWhiteBalanceSettings(self):
         # Make sure to query the system first
-        video_src_token_param = {"VideoSourceToken":self.video_source._token}
+        video_src_token_param = {"VideoSourceToken":self.video_source.token}
         imaging_settings = self.imaging_service.GetImagingSettings(video_src_token_param)
         #print("Debugging: Image Settings = " + str(imaging_settings))
 
@@ -551,7 +553,7 @@ class OnvifIFCamDriver(object):
         return auto_wb, manual_cr_gain, manual_cb_gain
     
     def setWhiteBalanceSettings(self, auto_wb, manual_cr_gain_scaled=None, manual_cb_gain_scaled=None, readback_check=True):
-        video_src_token_param = {"VideoSourceToken":self.video_source._token}
+        video_src_token_param = {"VideoSourceToken":self.video_source.token}
         imaging_settings = self.imaging_service.GetImagingSettings(video_src_token_param)
         
         if not hasattr(imaging_settings, "WhiteBalance"):
@@ -560,7 +562,7 @@ class OnvifIFCamDriver(object):
         updated_imaging_settings = self.imaging_service.create_type('SetImagingSettings')
         updated_imaging_settings.ImagingSettings = imaging_settings
         #print("Debugging: updated_imaging_settings before = " + str(updated_imaging_settings))
-        updated_imaging_settings.VideoSourceToken = self.video_source._token
+        updated_imaging_settings.VideoSourceToken = self.video_source.token
         updated_imaging_settings.ImagingSettings.WhiteBalance.Mode = "AUTO" if (auto_wb == True) else "MANUAL"
         if manual_cr_gain_scaled is not None:
             manual_cr_gain_unscaled = computeUnscaledFromScaled(manual_cr_gain_scaled, self.imaging_options.WhiteBalance.YrGain.Min, self.imaging_options.WhiteBalance.YrGain.Max)
@@ -572,7 +574,7 @@ class OnvifIFCamDriver(object):
         try:
             self.imaging_service.SetImagingSettings(updated_imaging_settings)
         except Exception as e:
-            return False, "Onvif error: Failed to update WhiteBalance - " + e.what()
+            return False, "Onvif error: Failed to update WhiteBalance - " + str(e)
 
         if (readback_check is True):
             auto_wb_rb, manual_cr_gain_rb, manual_cb_gain_rb = self.getWhiteBalanceSettings()
