@@ -3,7 +3,7 @@
 import socket
 import struct
 
-from onvif_cam_driver import OnvifIFCamDriver
+from nepi_edge_sdk_onvif.onvif_cam_driver import OnvifIFCamDriver
 
 ECON_ROUTECAM_DRIVER_ID = 'EConRouteCam'
 
@@ -14,9 +14,9 @@ class EConRouteCamDriver(OnvifIFCamDriver):
     GET_VIDEO_PARAM_CMD = struct.pack('<B', 0x23)
     SET_GET_VIDEO_PARAM_LENGTH = struct.pack('<i', 512)
 
-    VIDEO_ENC_H264_ARRAY = struct.pack('<4s16x', 'H264') # Zero-padded fixed-length string
+    VIDEO_ENC_H264_ARRAY = struct.pack('<4s16x', b'H264') # Zero-padded fixed-length string
     #VIDEO_ENC_H264_ARRAY = ['H','2','6','4',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] # Fixed 20-characters
-    VIDEO_ENC_HEVC_ARRAY = struct.pack('<4s16x', 'HEVC')
+    VIDEO_ENC_HEVC_ARRAY = struct.pack('<4s16x', b'HEVC')
     #VIDEO_ENC_HEVC_ARRAY = ['H','E','V','C',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] # Fixed 20-characters
 
     # Resolution options are fixed
@@ -128,7 +128,7 @@ class EConRouteCamDriver(OnvifIFCamDriver):
         if video_encoder_id >= self.encoder_count:
             return '', None
         self.retrieveEncoderCfg()
-        return self.encoder_cfg['Encoding'], self.encoder_cfg
+        return self.encoder_cfg['Encoding'].decode(), self.encoder_cfg
     
     def setEncoding(self, video_encoder_id, encoding_str):
         if video_encoder_id >= self.encoder_count:
