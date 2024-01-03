@@ -57,7 +57,9 @@ class OnvifIFCamDriver(object):
         self.cam = ONVIFCamera(ip_addr, port, username, password, self.WSDL_FOLDER)
         # The devicemgt service gets set up automatically
         self.device_info = self.cam.devicemgmt.GetDeviceInformation()
-        self.device_capabilities = self.cam.devicemgmt.GetCapabilities()
+        # COMMENTING THIS OUT: Seems to MAYBE be causing a problem with an ONWOTE Camera we have and we aren't using the return value and
+        # ONVIF docs say this function is deprecated anyway: https://www.onvif.org/ver10/device/wsdl/devicemgmt.wsdl
+        #self.device_capabilities = self.cam.devicemgmt.GetCapabilities()
         #print("Debugging: Sys Capabilities = " + str(self.device_capabilities))
         
         # Other services require manual setup
