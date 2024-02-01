@@ -55,9 +55,9 @@ class OnvifCameraNode:
             rospy.logerr(self.node_name + ": Missing network/camera_ip parameter... cannot start")
             return
                 
-        username = rospy.get_param('~credentials/username')
-        password = rospy.get_param('~credentials/password')
-        camera_ip = rospy.get_param('~network/camera_ip')
+        username = str(rospy.get_param('~credentials/username'))
+        password = str(rospy.get_param('~credentials/password'))
+        camera_ip = str(rospy.get_param('~network/camera_ip'))
         
         # Allow a default for the camera_port, since it is part of onvif spec.
         onvif_port = rospy.get_param('~network/camera_port', 80)
