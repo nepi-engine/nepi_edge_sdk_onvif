@@ -91,6 +91,8 @@ class OnvifPanTiltNode:
             'frame_id' : self.node_name + '_frame',
             'yaw_joint_name' : self.node_name + '_yaw_joint',
             'pitch_joint_name' : self.node_name + '_pitch_joint',
+            'reverse_yaw_control' : False,
+            'reverse_pitch_control' : False,
             'speed_ratio' : 1.0,
             'status_joint_state_pub_rate' : self.STATUS_JOINT_STATE_PUB_RATE
         }
