@@ -28,13 +28,14 @@ import rospy
 
 from nepi_edge_sdk_ptx.ptx_if import ROSPTXActuatorIF
 from nepi_edge_sdk_onvif.onvif_pan_tilt_driver import ONVIF_GENERIC_DRIVER_ID, OnvifIFPanTiltDriver
+from nepi_edge_sdk_base.save_cfg_if import SaveCfgIF
 
 class OnvifPanTiltNode:
-    DEFAULT_NODE_NAME = "onvif_pan_tilt_node"
+    DEFAULT_NODE_NAME = "onvif_pan_tilt"
     
     DRIVER_SPECIALIZATION_CONSTRUCTORS = {ONVIF_GENERIC_DRIVER_ID: OnvifIFPanTiltDriver} # Extend as necessary
 
-    STATUS_JOINT_STATE_PUB_RATE = 10.0 # Hz
+    DEFAULT_STATUS_UPDATE_RATE_HZ = 10.0 # Hz
 
     def __init__(self):
         # Launch the ROS node
@@ -94,7 +95,7 @@ class OnvifPanTiltNode:
             'reverse_yaw_control' : False,
             'reverse_pitch_control' : False,
             'speed_ratio' : 1.0,
-            'status_joint_state_pub_rate' : self.STATUS_JOINT_STATE_PUB_RATE
+            'status_update_rate_hz' : self.DEFAULT_STATUS_UPDATE_RATE_HZ
         }
 
         # TODO: Absolute position limits (hard and soft) in default_settings (see ptx_if.py). 
@@ -118,11 +119,17 @@ class OnvifPanTiltNode:
             "SetWaypointHere": self.setWaypointHere
         }
 
+        # Must pass a capabilities structure to ptx_interface constructor
+        ptx_default_capabilities = {}
+
         # Now check with the driver if any of these PTX capabilities are explicitly not present
         if not self.driver.hasAdjustableSpeed():
             ptx_callback_names["GetSpeed"] = None # Clear the method
             ptx_callback_names["SetSpeed"] = None # Clear the method
-
+            ptx_default_capabilities['has_speed_control'] = False
+        else:
+            ptx_default_capabilities['has_speed_control'] = True
+            
         if not self.driver.reportsPosition():
             ptx_callback_names["GetCurrentPosition"] = None # Clear the method
             
@@ -131,17 +138,24 @@ class OnvifPanTiltNode:
             ptx_callback_names["GotoPosition"] = None # Clear the method
         
         self.has_absolute_positioning_and_feedback = self.driver.hasAbsolutePositioning() and self.driver.reportsPosition()
+        ptx_default_capabilities['has_absolute_positioning'] = self.has_absolute_positioning_and_feedback
                 
         if not self.driver.canHome() and not self.has_absolute_positioning_and_feedback:
             ptx_callback_names["GoHome"] = None
+            ptx_default_capabilities['has_homing'] = False
+        else:
+            ptx_default_capabilities['has_homing'] = True
+        
             
         if not self.driver.homePositionAdjustable() and not self.has_absolute_positioning_and_feedback:
-                ptx_callback_names["SetHomePositionHere"] = None
-
+            ptx_callback_names["SetHomePositionHere"] = None
+        
         if not self.driver.hasWaypoints() and not self.has_absolute_positioning_and_feedback:
             ptx_callback_names["GotoWaypoint"] = None
             ptx_callback_names["SetWaypointHere"] = None
-
+            ptx_default_capabilities['has_waypoints'] = False
+        else:
+            ptx_default_capabilities['has_waypoints'] = True
         
         # Following are implemented entirely in software because ONVIF has no support for setting HOME or PRESET by position
         if not self.has_absolute_positioning_and_feedback:
@@ -151,6 +165,7 @@ class OnvifPanTiltNode:
         # Now that we've updated the callbacks table, can apply the remappings... this is particularly useful since
         # many ONVIF devices report capabilities that they don't actually have, so need a user-override mechanism. In
         # that case, assign these to null in the config file
+        # TODO: Not sure we actually need remappings for PTX: Makes sense for IDX because there are lots of controllable params.
         ptx_remappings = rospy.get_param('~ptx_remappings', {})
         rospy.loginfo(self.node_name + ': Establishing PTX remappings')
         for from_name in ptx_remappings:
@@ -173,6 +188,7 @@ class OnvifPanTiltNode:
                                        hw_version = self.driver.getDeviceHardwareId(),
                                        sw_version = self.driver.getDeviceFirmwareVersion(),
                                        default_settings = default_settings,
+                                       default_capabilities = ptx_default_capabilities,
                                        stopMovingCb = ptx_callback_names["StopMoving"],
                                        moveYawCb = ptx_callback_names["MoveYaw"],
                                        movePitchCb = ptx_callback_names["MovePitch"],
@@ -192,6 +208,9 @@ class OnvifPanTiltNode:
         self.home_yaw_deg = 0.0
         self.home_pitch_deg = 0.0
         self.waypoints = [] # List of dictionaries with waypoint_pitch, waypoint_yaw
+
+        # Set up save_cfg interface
+        self.save_cfg_if = SaveCfgIF(updateParamsCallback=self.setCurrentSettingsAsDefault, paramsModifiedCallback=self.updateFromParamServer)
 
         rospy.spin()
     
@@ -284,6 +303,13 @@ class OnvifPanTiltNode:
             self.driver.setPresetHere(waypoint_index)
 
         rospy.loginfo("Waypoint set to current position")
+
+    def setCurrentSettingsAsDefault(self):
+        # Don't need to worry about any of our params in this class, just child interfaces' params
+        self.ptx_if.setCurrentSettingsToParamServer()
+
+    def updateFromParamServer(self):
+        self.ptx_if.updateFromParamServer()
 
 if __name__ == '__main__':
 	node = OnvifPanTiltNode()
