@@ -180,6 +180,7 @@ install(DIRECTORY launch/
 catkin_install_python(PROGRAMS
   scripts/onvif_camera_node.py
   scripts/onvif_pan_tilt_node.py
+  scripts/onvif_mgr.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

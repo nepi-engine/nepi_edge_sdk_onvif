@@ -1,0 +1,17 @@
+credentials:
+  password: 123456
+  username: admin
+driver_id: GenericONVIF
+network:
+  pan_tilt_ip: 192.168.179.111
+  pan_tilt_port: 80
+ptx:
+  frame_id: onvif_pan_tilt_frame
+  pitch_joint_name: onvif_pan_tilt_pitch_joint
+  reverse_pitch_control: false
+  reverse_yaw_control: false
+  speed_ratio: 1.0
+  yaw_joint_name: onvif_pan_tilt_yaw_joint
+ptx_remappings:
+  GetSpeed: None
+  SetSpeed: None

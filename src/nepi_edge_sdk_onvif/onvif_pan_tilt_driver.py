@@ -29,7 +29,7 @@ import datetime
 
 from onvif import ONVIFCamera # python-onvif
 
-ONVIF_GENERIC_DRIVER_ID = 'GenericONVIF'
+ONVIF_GENERIC_PTZ_DRIVER_ID = 'GenericONVIFPTZ'
 
 class OnvifIFPanTiltDriver(object):
     WSDL_FOLDER = "/opt/nepi/ros/etc/onvif/wsdl/"

@@ -27,13 +27,13 @@
 import rospy
 
 from nepi_edge_sdk_ptx.ptx_if import ROSPTXActuatorIF
-from nepi_edge_sdk_onvif.onvif_pan_tilt_driver import ONVIF_GENERIC_DRIVER_ID, OnvifIFPanTiltDriver
+from nepi_edge_sdk_onvif.onvif_pan_tilt_driver import ONVIF_GENERIC_PTZ_DRIVER_ID, OnvifIFPanTiltDriver
 from nepi_edge_sdk_base.save_cfg_if import SaveCfgIF
 
 class OnvifPanTiltNode:
     DEFAULT_NODE_NAME = "onvif_pan_tilt"
     
-    DRIVER_SPECIALIZATION_CONSTRUCTORS = {ONVIF_GENERIC_DRIVER_ID: OnvifIFPanTiltDriver} # Extend as necessary
+    DRIVER_SPECIALIZATION_CONSTRUCTORS = {ONVIF_GENERIC_PTZ_DRIVER_ID: OnvifIFPanTiltDriver} # Extend as necessary
 
     DEFAULT_STATUS_UPDATE_RATE_HZ = 10.0 # Hz
 
@@ -50,20 +50,20 @@ class OnvifPanTiltNode:
         if not rospy.has_param('~credentials/password'):
             rospy.logerr(self.node_name + ": Missing credentials/password parameter... cannot start")
             return
-        if not rospy.has_param('~network/pan_tilt_ip'):
-            rospy.logerr(self.node_name + ": Missing network/pan_tilt_ip parameter... cannot start")
+        if not rospy.has_param('~network/host'):
+            rospy.logerr(self.node_name + ": Missing network/host parameter... cannot start")
             return
                 
         username = str(rospy.get_param('~credentials/username'))
         password = str(rospy.get_param('~credentials/password'))
-        pan_tilt_ip = str(rospy.get_param('~network/pan_tilt_ip'))
+        host = str(rospy.get_param('~network/host'))
 
         # Allow a default for the pan_tilt_port, since it is part of onvif spec.
-        onvif_port = int(rospy.get_param('~network/pan_tilt_port', 80))
-        rospy.set_param('~network/pan_tilt_port', onvif_port)
+        onvif_port = int(rospy.get_param('~network/port', 80))
+        rospy.set_param('~network/port', onvif_port)
 
         # Set up for specialized drivers here
-        self.driver_id = rospy.get_param('~driver_id', ONVIF_GENERIC_DRIVER_ID)
+        self.driver_id = rospy.get_param('~driver_id', ONVIF_GENERIC_PTZ_DRIVER_ID)
         rospy.set_param('~driver_id', self.driver_id)
         if self.driver_id not in self.DRIVER_SPECIALIZATION_CONSTRUCTORS:
             rospy.logerr(self.node_name + ": unknown driver_id " + self.driver_id)
@@ -74,9 +74,9 @@ class OnvifPanTiltNode:
         rospy.loginfo(self.node_name + ": Launching " + self.driver_id + " driver")
         while not rospy.is_shutdown():
             try:
-                #self.driver = DriverConstructor(username, password, pan_tilt_ip, onvif_port)
+                #self.driver = DriverConstructor(username, password, host, onvif_port)
                 #rospy.logerr("DEBUG: Launching with hard-coded credentials")
-                self.driver = DriverConstructor(username, password, pan_tilt_ip, onvif_port)
+                self.driver = DriverConstructor(username, password, host, onvif_port)
                 break
             except Exception as e:
                 # Only log the error every 30 seconds -- don't want to fill up log in the case that the camera simply isn't attached.

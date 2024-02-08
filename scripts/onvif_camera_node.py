@@ -51,17 +51,17 @@ class OnvifCameraNode:
         if not rospy.has_param('~credentials/password'):
             rospy.logerr(self.node_name + ": Missing credentials/password parameter... cannot start")
             return
-        if not rospy.has_param('~network/camera_ip'):
-            rospy.logerr(self.node_name + ": Missing network/camera_ip parameter... cannot start")
+        if not rospy.has_param('~network/host'):
+            rospy.logerr(self.node_name + ": Missing network/host parameter... cannot start")
             return
                 
         username = str(rospy.get_param('~credentials/username'))
         password = str(rospy.get_param('~credentials/password'))
-        camera_ip = str(rospy.get_param('~network/camera_ip'))
+        host = str(rospy.get_param('~network/host'))
         
-        # Allow a default for the camera_port, since it is part of onvif spec.
-        onvif_port = rospy.get_param('~network/camera_port', 80)
-        rospy.set_param('~/network/camera_port', onvif_port)
+        # Allow a default for the port, since it is part of onvif spec.
+        onvif_port = rospy.get_param('~network/port', 80)
+        rospy.set_param('~/network/port', onvif_port)
 
         # Set up for specialized drivers here
         self.driver_id = rospy.get_param('~driver_id', ONVIF_GENERIC_DRIVER_ID)
@@ -75,7 +75,7 @@ class OnvifCameraNode:
         rospy.loginfo(self.node_name + ": Launching " + self.driver_id + " driver")
         while not rospy.is_shutdown():
             try:
-                self.driver = DriverConstructor(username, password, camera_ip, onvif_port)
+                self.driver = DriverConstructor(username, password, host, onvif_port)
                 break
             except Exception as e:
                 # Only log the error every 30 seconds -- don't want to fill up log in the case that the camera simply isn't attached.
