@@ -28,8 +28,7 @@ import os
 import subprocess
 import time
 from wsdiscovery.discovery import ThreadedWSDiscovery as WSDiscovery
-from wsdiscovery import Scope
-from onvif import ONVIFCamera, ONVIFError
+from onvif import ONVIFCamera
 import urllib.parse
 import rospy
 import rosparam
