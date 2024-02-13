@@ -188,6 +188,13 @@ class ONVIFMgr:
       resp_status_for_device = OnvifDeviceStatus()
       resp_status_for_device.uuid = uuid
       device = self.detected_onvifs[uuid]
+      
+      # Manufacturer settings
+      resp_status_for_device.manufacturer = device['manufacturer']
+      resp_status_for_device.model = device['model']
+      resp_status_for_device.firmware_version = device['firmware_version']
+      resp_status_for_device.hardware_id = device['hardware_id']
+
       # Network settings
       resp_status_for_device.host = device['host']
       resp_status_for_device.port = device['port']
@@ -255,6 +262,10 @@ class ONVIFMgr:
         #rospy.loginfo('Debug: Detected UUID=%s,XADDR=%s:%d, NVT=%s, PTZ=%s', str(uuid), str(hostname), port, str(is_nvt), str(is_ptz))
 
         self.detected_onvifs[uuid] = {
+          'manufacturer' : '',
+          'model' : '',
+          'firmware_version' : '',
+          'hardware_id' : '',
           'host': hostname, 
           'port': port, 
           'video': is_nvt, 
@@ -324,6 +335,7 @@ class ONVIFMgr:
     password = config['password']
     hostname = self.detected_onvifs[uuid]['host']
     port = self.detected_onvifs[uuid]['port']
+
     try:
       cam = ONVIFCamera(hostname, port, username, password, self.WSDL_FOLDER)
       #reported_hostname = cam.devicemgmt.GetHostname()['Name']
@@ -331,6 +343,12 @@ class ONVIFMgr:
     except Exception as e:
       rospy.logwarn('Unable to connect to detected ONVIF device %s at %s:%d via configured credentials (%s)', uuid, hostname, port, e)
       return False
+    
+    dev_info = cam.devicemgmt.GetDeviceInformation()
+    self.detected_onvifs[uuid]['manufacturer'] = dev_info["Manufacturer"]
+    self.detected_onvifs[uuid]['model'] = dev_info["Model"]
+    self.detected_onvifs[uuid]['firmware_version'] = dev_info["FirmwareVersion"]
+    self.detected_onvifs[uuid]['hardware_id'] = dev_info["HardwareId"]
 
     return True    
 
