@@ -77,8 +77,6 @@ class ONVIFMgr:
   
   DEFAULT_DISCOVERY_INTERVAL_S = 10.0
   
-  #ONVIF_SCOPE_NVT = Scope("onvif://www.onvif.org/type/Network_Video_Transmitter")
-  #ONVIF_SCOPE_PTZ = Scope("onvif://www.onvif.org/type/ptz")
   ONVIF_SCOPE_NVT_ID = 'Network_Video_Transmitter'
   ONVIF_SCOPE_NVT_ALT_ID = 'NetworkVideoTransmitter' # ONVIF spec. says this name is legal for NVT, too
   ONVIF_SCOPE_PTZ_ID = 'ptz'
@@ -220,16 +218,20 @@ class ONVIFMgr:
   def runDiscovery(self, _):
     #rospy.loginfo('Debug: running discovery')
 
-    # Clear the remote services so that we can rediscover everything fresh to detect dropped services
-    self.wsd.clearRemoteServices()
-    
-    #detected_services = self.wsd.searchServices(scopes=[self.ONVIF_SCOPE_NVT, self.ONVIF_SCOPE_PTZ])
-    detected_services = self.wsd.searchServices()
+    # Don't do clearRemoteServices() -- some devices only respond once to discovery
+    #self.wsd.clearRemoteServices()
         
+    detected_services = self.wsd.searchServices()
+    #detected_services = self.wsd.searchServices(scopes=self.ONVIF_SCOPES)
+            
     detected_uuids = []
     for service in detected_services:
       endpoint_ref = service.getEPR()
-      uuid = endpoint_ref.split(':')[2]
+      endpoint_ref_tokens = endpoint_ref.split(':')
+      if len(endpoint_ref_tokens) < 3:
+        rospy.logwarn(self.node_name + ': Detected ill-formed endpoint reference %s... skipping')
+        continue # Ill-formed
+      uuid = endpoint_ref_tokens[2]
       # Some devices randomize the first part of their UUID on each reboot, so truncate that off
       if '-' in uuid:
         uuid_tokens = uuid.split('-')[1:]
@@ -237,7 +239,7 @@ class ONVIFMgr:
       uuid = uuid.upper()
       detected_uuids.append(uuid)
       #rospy.logwarn('\tDebug: Detected %s', uuid)
-      
+            
       # Query this device and add to our tracked list if not previously done
       if uuid not in self.detected_onvifs:
         xaddr = service.getXAddrs()[0]
@@ -249,6 +251,11 @@ class ONVIFMgr:
         is_ptz = False
         for scope in service.getScopes():
           scope_val = scope.getValue()
+
+          if not scope_val.startswith('onvif'):
+            # Skip any WSDiscovery device that is not ONVIF
+            continue
+
           #rospy.loginfo('\tDebug: Scope = %s', scope_val)
           # Check for video streaming
           if scope_val.endswith(self.ONVIF_SCOPE_NVT_ID) or scope_val.endswith(self.ONVIF_SCOPE_NVT_ALT_ID):
@@ -257,6 +264,10 @@ class ONVIFMgr:
           # Check for PTZ
           if scope_val.endswith(self.ONVIF_SCOPE_PTZ_ID):
             is_ptz = True
+
+        # Just skip any WSDiscovery device that is not identified as NVT or PTZ
+        if (not is_nvt) and (not is_ptz):
+          continue
 
         #rospy.loginfo('Debug: Detected UUID=%s,XADDR=%s:%d, NVT=%s, PTZ=%s', str(uuid), str(hostname), port, str(is_nvt), str(is_ptz))
 
@@ -270,7 +281,8 @@ class ONVIFMgr:
           'video': is_nvt, 
           'ptz': is_ptz, 
           'idx_subproc' : None, 
-          'ptx_subproc' : None
+          'ptx_subproc' : None,
+          'connectable' : False,
         }
 
         # Now determine if it has a config struct
