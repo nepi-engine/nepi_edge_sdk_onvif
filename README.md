@@ -24,7 +24,7 @@ Contact Information:
 -->
 # nepi_edge_sdk_onvif #
 
-This repository hosts the NEPI ONVIF driver and ROS nodes to support integration of ONVIF cameras with NEPI devices.
+This repository hosts the NEPI ONVIF driver and ROS nodes to support autodetection, status, controls, and data streaming for ONVIF cameras with NEPI devices.
 
 ### Build and Install ###
 This repository is typically built as part of the _nepi_base_ws_ catkin workspace. Refer to that project's top-level README for build and install instructions.
