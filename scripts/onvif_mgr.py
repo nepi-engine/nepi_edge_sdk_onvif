@@ -92,9 +92,14 @@ class ONVIFMgr:
 
     self.detected_onvifs = {}
     self.configured_onvifs = rospy.get_param('~onvif_devices', {})
+
     # Testing only
     #rospy.logerr("TESTING: OVERRIDING ~onvif_devices")
     #self.configured_onvifs = DEBUG_CONFIGURED_ONVIFS_FOR_TEST
+
+    # Iterate through these configured devices fixing invalid characters in the node base name
+    for uuid in self.configured_onvifs:
+      self.configured_onvifs[uuid]['node_base_name'] = self.configured_onvifs[uuid]['node_base_name'].replace(' ','_').replace('-','_')
 
     #### WARNING ####
     # Do not use topics in this class, only services... somehow just the execution of any subscriber
@@ -130,11 +135,14 @@ class ONVIFMgr:
     else:
       rospy.loginfo('Setting configuration for as-yet undetected device %s', uuid)
       detected_device = None
+
+    # Make sure the node_base_name is legal ROS
+    legal_base_name = device_cfg.node_base_name.replace(' ', '_').replace('-','_')
         
     updated_cfg = {
       'username' : device_cfg.username,
       'password' : device_cfg.password,
-      'node_base_name' : device_cfg.node_base_name,
+      'node_base_name' : legal_base_name,
       'idx_enabled' : device_cfg.idx_enabled,
       'ptx_enabled' : device_cfg.ptx_enabled
     }
