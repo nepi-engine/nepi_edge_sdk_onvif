@@ -221,7 +221,7 @@ class ONVIFMgr:
       endpoint_ref = service.getEPR()
       endpoint_ref_tokens = endpoint_ref.split(':')
       if len(endpoint_ref_tokens) < 3:
-        rospy.logwarn(self.node_name + ': Detected ill-formed endpoint reference %s... skipping')
+        rospy.logwarn(self.node_name + ': Detected ill-formed endpoint reference %s... skipping', endpoint_ref)
         continue # Ill-formed
       uuid = endpoint_ref_tokens[2]
       # Some devices randomize the first part of their UUID on each reboot, so truncate that off
@@ -459,7 +459,11 @@ class ONVIFMgr:
       os.symlink(full_path_config_file_factory, full_path_config_file)
     
     rospy.loginfo(self.node_name + ": Loading parameters from " + full_path_config_file + " for " + node_namespace)
-    rosparam.load_file(filename = full_path_config_file, default_namespace = node_namespace)
+    rosparam_load_cmd = ['rosparam', 'load', full_path_config_file, node_namespace]
+    subprocess.run(rosparam_load_cmd)
+        
+    # This doesn't work -- returns a dictionary, but you must still use rosparam.upload_params() to get them to the server!!!
+    #rosparam.load_file(filename = full_path_config_file, default_namespace = node_namespace)
 
   def setCurrentSettingsAsDefault(self):
     rospy.set_param('~discovery_interval_s', self.discovery_interval_s)
