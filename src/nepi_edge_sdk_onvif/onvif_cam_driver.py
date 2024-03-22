@@ -255,10 +255,12 @@ class OnvifIFCamDriver(object):
         return (len(framerate_range) > 1)
 
     def hasAdjustableImagingSetting(self, onvif_setting_name, onvif_subsetting_name=None):
-        if not hasattr(self.imaging_options, onvif_setting_name):
+        if (not hasattr(self.imaging_options, onvif_setting_name)) or (self.imaging_options[onvif_setting_name] is None):
             return False
         
-        if (onvif_subsetting_name is not None) and (not hasattr(self.imaging_options[onvif_setting_name], onvif_subsetting_name)):
+        if (onvif_subsetting_name is not None) and \
+           ((not hasattr(self.imaging_options[onvif_setting_name], onvif_subsetting_name)) or \
+            (self.imaging_options[onvif_setting_name][onvif_subsetting_name] is None)):
             return False
         
         return True                                        
