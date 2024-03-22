@@ -1,7 +1,7 @@
 credentials:
   password: 123456
   username: admin
-driver_id: GenericONVIF
+driver_id: GenericONVIFPTZ
 network:
   pan_tilt_ip: 192.168.179.111
   pan_tilt_port: 80
