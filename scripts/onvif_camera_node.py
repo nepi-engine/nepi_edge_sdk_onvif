@@ -194,18 +194,27 @@ class OnvifCameraNode:
             return
         
         #available_resolutions is a list of dicts
-        # Sort them by width from least to greatest
-        available_resolutions = sorted(available_resolutions, key=lambda d: d['Width'])
-
-        # Current policy is to take the lowest res, then fill out the rest with the highest
+        # Sort them by total pixel count from least to greatest
+        available_resolutions = sorted(available_resolutions, key=lambda d: (int(d['Width'])*int(d['Height'])))
+        
+        # Current policy is to take the lowest res as LOW, highest as HIGH, then fill out the rest with evenly spaced intermediates
         available_resolution_count = len(available_resolutions)
         resolution_mode_count = ROSIDXSensorIF.RESOLUTION_MODE_MAX + 1
         self.resolution_mode_map = {0:available_resolutions[0]}
-        for i in range(1,resolution_mode_count):
-            res_index = (available_resolution_count - i) if (i < available_resolution_count) else (available_resolution_count - 1)
-            self.resolution_mode_map[resolution_mode_count - i] = available_resolutions[res_index]
+        self.resolution_mode_map[3] = available_resolutions[-1]
+        if (available_resolution_count == 1):
+            self.resolution_mode_map[1] = available_resolutions[0]
+            self.resolution_mode_map[2] = available_resolutions[0]
+        elif (available_resolution_count == 2):
+            self.resolution_mode_map[1] = available_resolutions[0]
+            self.resolution_mode_map[2] = available_resolutions[1]
+        else:
+            resolution_step = int(available_resolution_count / 3)            
+            self.resolution_mode_map[1] = available_resolutions[resolution_step]
+            self.resolution_mode_map[2] = available_resolutions[2*resolution_step]
 
         rospy.loginfo(self.node_name + ": Resolution Modes" )
+        rospy.logerr('Debug ' + self.node_name + ": Resolution Modes" )
         for i in range(resolution_mode_count):
             rospy.loginfo("\t" + str(i) + ": " +  str(self.resolution_mode_map[i]['Width']) + 'x' + str(self.resolution_mode_map[i]['Height']))
     
