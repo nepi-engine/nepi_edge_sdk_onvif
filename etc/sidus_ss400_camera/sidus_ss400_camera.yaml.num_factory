@@ -10,7 +10,7 @@ network:
 idx: 
   brightness: 0.5
   contrast: 0.5
-  framerate_mode: 3
+  framerate_mode: 1
   resolution_mode: 1
 
 save_data_continuous: false
