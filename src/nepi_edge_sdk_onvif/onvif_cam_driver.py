@@ -139,9 +139,12 @@ class OnvifIFCamDriver(object):
         #print("!!!!!!!! Debug: Backend is " + self.rtsp_caps[uri_index].getBackendName() + "!!!!!!!")
         if not self.rtsp_caps[uri_index].isOpened():
             # Try adding username and password to URI per RTSP standards
-            uri_pre = self.rtsp_uris[uri_index].split('//')[0]
-            uri_post = self.rtsp_uris[uri_index].split('//')[1]
-            secure_uri = uri_pre + self.username + ":" + self.password + "@" + uri_post
+            if '//' in self.rtsp_uris[uri_index]: # Hasn't been updated to the 'secure' version yet
+                uri_pre = self.rtsp_uris[uri_index].split('//')[0]
+                uri_post = self.rtsp_uris[uri_index].split('//')[1]
+                secure_uri = uri_pre + self.username + ":" + self.password + "@" + uri_post
+            else: # If not a standard URL with '//,' assume the secure URI is already set
+                secure_uri = self.rtsp_uris[uri_index]
             self.rtsp_caps[uri_index] = cv2.VideoCapture(secure_uri)
             if not self.rtsp_caps[uri_index].isOpened():
                 self.rtsp_caps[uri_index].release()
