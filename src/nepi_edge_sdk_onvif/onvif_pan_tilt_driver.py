@@ -90,8 +90,14 @@ class OnvifIFPanTiltDriver(object):
         self.max_timeout = timeout_limits.Max
         self.min_timeout = timeout_limits.Min
 
-        self.reports_position = True if (ptz_caps != None) and (ptz_caps.StatusPosition is True) else False
-
+        self.reports_position = True if (ptz_caps != None) and (hasattr(ptz_caps, 'StatusPosition')) and (ptz_caps.StatusPosition is True) else False
+        
+        # Limits per ONVIF standard (I think)
+        self.max_pan_position_ratio = 1.0
+        self.min_pan_position_ratio = -1.0
+        self.max_tilt_position_ratio = 1.0
+        self.min_tilt_position_ratio = -1.0
+                
         self.can_home = node.HomeSupported and (node.FixedHomePosition != None)
         self.home_position_adjustable = self.can_home and (not node.FixedHomePosition)
         self.max_preset_count = node.MaximumNumberOfPresets
@@ -141,16 +147,18 @@ class OnvifIFPanTiltDriver(object):
         #print(self.ptz_service.GetStatus({'ProfileToken': self.profile_token}))
 
     def stopMotion(self):
-        request = self.ptz_service.create_type('Stop')
-        request.ProfileToken = self.profile_token
-        self.ptz_service.Stop(request)
+        # Experimental: Try a jog with zero speed instead of the PTZ 'Stop' -- seems to be more universally accepted?
+        #request = self.ptz_service.create_type('Stop')
+        #request.ProfileToken = self.profile_token
+        #self.ptz_service.Stop(request)
+        self.jog(1,1,0.0)
 
     def jog(self, pan_direction, tilt_direction, speed_ratio, time_s = 1):
         self.continuous_move_request.Velocity.PanTilt.x = speed_ratio * pan_direction
         self.continuous_move_request.Velocity.PanTilt.y = speed_ratio * tilt_direction
-        self.continuous_move_request.Timeout = datetime.timedelta(seconds = time_s)
-        self.ptz_service.ContinuousMove(self.continuous_move_request)
-
+        #self.continuous_move_request.Timeout = datetime.timedelta(seconds = time_s)
+        self.ptz_service.ContinuousMove(self.continuous_move_request) # Ignore requested time_s -- causes errors on some devices
+    
     def moveToPosition(self, pan_position_ratio, tilt_position_ratio, speed_ratio):
         self.abs_move_request.Position.PanTilt.x = self.min_pan_position_ratio + (pan_position_ratio * (self.max_pan_position_ratio - self.min_pan_position_ratio))
         self.abs_move_request.Position.PanTilt.y = self.min_tilt_position_ratio + (tilt_position_ratio * (self.max_tilt_position_ratio - self.min_tilt_position_ratio))
