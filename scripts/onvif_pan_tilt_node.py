@@ -228,15 +228,22 @@ class OnvifPanTiltNode:
         return self.speed_ratio
             
     def getCurrentPosition(self):
-        pan_ratio, tilt_ratio = self.driver.getCurrentPosition()
+        pan_ratio_onvif, tilt_ratio_onvif = self.driver.getCurrentPosition()
+        # Recenter the -1.0,1.0 ratio from Onvif to the 0.0,1.0 used throughout the rest of NEPI
+        pan_ratio = (0.5 * pan_ratio_onvif) + 0.5
+        tilt_ratio = (0.5 * tilt_ratio_onvif) + 0.5
+        #rospy.logwarn(f"Debug: Current position ratio = {pan_ratio},{tilt_ratio}")
         pan_deg = self.ptx_if.yawRatioToDeg(pan_ratio)
         tilt_deg = self.ptx_if.pitchRatioToDeg(tilt_ratio)
         return pan_deg, tilt_deg
 
     def gotoPosition(self, yaw_deg, pitch_deg):
         yaw_ratio = self.ptx_if.yawDegToRatio(yaw_deg)
-        pitch_ratio = self.ptx_if.pitchRatioToDeg(pitch_deg)
-        self.driver.moveToPosition(yaw_ratio, pitch_ratio, self.speed_ratio)
+        pitch_ratio = self.ptx_if.pitchDegToRatio(pitch_deg)
+        # Recenter the ratios to the ONVIF -1.0,1.0 range
+        yaw_ratio_onvif = 2 * (yaw_ratio - 0.5) 
+        pitch_ratio_onvif = 2 * (pitch_ratio - 0.5)
+        self.driver.moveToPosition(yaw_ratio_onvif, pitch_ratio_onvif, self.speed_ratio)
         
     def goHome(self):
         if self.driver.canHome() is True:
@@ -244,7 +251,9 @@ class OnvifPanTiltNode:
         elif self.driver.hasAbsolutePositioning() is True:
             home_yaw_ratio = self.ptx_if.yawDegToRatio(self.home_yaw_deg)
             home_pitch_ratio = self.ptx_if.pitchDegToRatio(self.home_pitch_deg)
-            self.driver.moveToPosition(home_yaw_ratio, home_pitch_ratio, self.speed_ratio)
+            home_yaw_ratio_onvif = 2 * (home_yaw_ratio - 0.5)
+            home_pitch_ratio_onvif = 2 * (home_pitch_ratio - 0.5)
+            self.driver.moveToPosition(home_yaw_ratio_onvif, home_pitch_ratio_onvif, self.speed_ratio)
         else:
             rospy.logwarn("Homing not supported by this PTX device... ignoring")
 
@@ -255,7 +264,9 @@ class OnvifPanTiltNode:
 
     def setHomePositionHere(self):
         if self.driver.reportsPosition() is True:
-            curr_yaw_ratio, curr_pitch_ratio = self.driver.getCurrentPosition()
+            curr_yaw_ratio_onvif, curr_pitch_ratio_onvif = self.driver.getCurrentPosition()
+            curr_yaw_ratio = (curr_yaw_ratio_onvif + 1.0) * 0.5
+            curr_pitch_ratio = (curr_pitch_ratio_onvif + 1.0) * 0.5
             self.home_yaw_deg = self.ptx_if.yawRatioToDeg(curr_yaw_ratio)
             self.home_pitch_deg = self.ptx_if.pitchRatioToDeg(curr_pitch_ratio) 
 
@@ -267,12 +278,17 @@ class OnvifPanTiltNode:
            self.driver.gotoPreset(waypoint_index, self.speed_ratio)
         elif self.driver.hasAbsolutePositioning() is True:
             if waypoint_index not in self.waypoints:
-                rospy.logwarn("Requested waypoint index %u is invalid/unset... ignoring")
+                rospy.logwarn("Requested waypoint index %u is invalid/unset... ignoring", waypoint_index)
                 return
             
             waypoint_yaw_deg = self.waypoints[waypoint_index]['yaw_deg']
+            waypoint_yaw_ratio = self.ptx_if.yawDegToRatio(waypoint_yaw_deg)
             waypoint_pitch_deg = self.waypoints[waypoint_index]['pitch_deg']
-            self.driver.moveToPosition(waypoint_yaw_deg, waypoint_pitch_deg, self.speed_ratio)
+            waypoint_pitch_ratio = self.ptx_if.pitchDegToRatio(waypoint_pitch_deg)
+
+            waypoint_yaw_ratio_onvif = 2 * (waypoint_yaw_ratio - 0.5)
+            waypoint_pitch_ratio_onvif = 2 * (waypoint_pitch_ratio - 0.5)
+            self.driver.moveToPosition(waypoint_yaw_ratio_onvif, waypoint_pitch_ratio_onvif, self.speed_ratio)
     
     def setWaypoint(self, waypoint_index, yaw_deg, pitch_deg):
         # Have to implement these fully in s/w since ONVIF doesn't support absolute home position setting
@@ -280,7 +296,9 @@ class OnvifPanTiltNode:
         
     def setWaypointHere(self, waypoint_index):
         if self.driver.reportsPosition():
-            yaw_ratio, pitch_ratio = self.driver.getCurrentPosition()
+            yaw_ratio_onvif, pitch_ratio_onvif = self.driver.getCurrentPosition()
+            yaw_ratio = (yaw_ratio_onvif + 1.0) * 0.5
+            pitch_ratio = (pitch_ratio_onvif + 1.0) * 0.5
             current_yaw_deg = self.ptx_if.yawRatioToDeg(yaw_ratio)
             current_pitch_deg = self.ptx_if.pitchRatioToDeg(pitch_ratio)
             self.waypoints[waypoint_index] = {'yaw_deg': current_yaw_deg, 'pitch_deg': current_pitch_deg}
