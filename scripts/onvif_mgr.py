@@ -576,7 +576,7 @@ def soapGetDeviceInformation(globalip, globalport, username, password):
     url = f"http://{globalip}:{globalport}{DEVICE_SERVICE_PATH}"
     soap_resp = requests.post(url, data=soap_env, headers=headers, timeout=30)
 
-    rospy.logwarn(f'Debug: Got devinfo response {soap_resp.text}')
+    #rospy.logwarn(f'Debug: Got devinfo response {soap_resp.text}')
     # Initialize to unknown
     device_info = {
         "Manufacturer" : "Unknown",
