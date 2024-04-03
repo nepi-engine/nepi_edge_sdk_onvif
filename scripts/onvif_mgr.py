@@ -280,8 +280,14 @@ class ONVIFMgr:
         hostname = parsed_xaddr.hostname
         port = parsed_xaddr.port if parsed_xaddr.port is not None else 80
         
-        is_nvt = False
-        is_ptz = False
+        #rospy.logwarn('\tDebug: %s Has %d scopes', uuid, len(service.getScopes()))
+        # Haven't found any universally valid way to determine if a device supports video and/or pan/tilt, so 
+        # just hardcoding these as true for now -- up to the user to enable IDX or PTX as applicable
+        #is_nvt = False
+        #is_ptz = False
+        is_nvt = True
+        is_ptz = True
+        
         for scope in service.getScopes():
           scope_val = scope.getValue()
 
@@ -291,12 +297,14 @@ class ONVIFMgr:
 
           #rospy.loginfo('\tDebug: Scope = %s', scope_val)
           # Check for video streaming
-          if scope_val.endswith(self.ONVIF_SCOPE_NVT_ID) or scope_val.endswith(self.ONVIF_SCOPE_NVT_ALT_ID):
-            is_nvt = True
+          # Commenting out -- see is_nvt note above
+          #if scope_val.endswith(self.ONVIF_SCOPE_NVT_ID) or scope_val.endswith(self.ONVIF_SCOPE_NVT_ALT_ID):
+          #  is_nvt = True
                   
           # Check for PTZ
-          if scope_val.endswith(self.ONVIF_SCOPE_PTZ_ID):
-            is_ptz = True
+          # Commenting out -- see is_ptz note above
+          #if scope_val.endswith(self.ONVIF_SCOPE_PTZ_ID):
+          #  is_ptz = True
 
         # Just skip any WSDiscovery device that is not identified as NVT or PTZ
         if (not is_nvt) and (not is_ptz):
