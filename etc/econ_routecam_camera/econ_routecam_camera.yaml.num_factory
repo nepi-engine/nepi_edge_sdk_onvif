@@ -16,7 +16,7 @@ idx:
 idx_remappings:
   Thresholding: ColorSaturation
 
-driver_id: EConRouteCam
+driver_id: EConRouteCam_NVT
 
 save_data_continuous: false
 save_data_raw: false

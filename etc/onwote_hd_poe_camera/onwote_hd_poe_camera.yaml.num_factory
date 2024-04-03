@@ -3,6 +3,8 @@ credentials:
   username: admin
   password: admin
 
+driver_id: GenericONVIF_NVT
+
 network:
   camera_ip: 192.168.0.33
   camera_port: 80

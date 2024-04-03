@@ -25,7 +25,7 @@ def computeUnscaledFromScaled(scaled, min_unscaled, max_unscaled, force_integer=
         unscaled = round(unscaled)
     return unscaled
 
-ONVIF_GENERIC_DRIVER_ID = 'GenericONVIF'
+ONVIF_GENERIC_DRIVER_ID = 'GenericONVIF_NVT'
 
 class OnvifIFCamDriver(object):
     #WSDL_FOLDER = "/home/josh/Desktop/Work/tmp/onvif_practice/python-onvif/wsdl/" # TODO: Update to the real location as installed via python-onvif

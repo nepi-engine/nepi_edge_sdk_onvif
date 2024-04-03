@@ -13,7 +13,7 @@ import struct
 
 from nepi_edge_sdk_onvif.onvif_cam_driver import OnvifIFCamDriver
 
-ECON_ROUTECAM_DRIVER_ID = 'EConRouteCam'
+ECON_ROUTECAM_DRIVER_ID = 'EConRouteCam_NVT'
 
 class EConRouteCamDriver(OnvifIFCamDriver):
     SOCKET_SERVER_PORT = 8080

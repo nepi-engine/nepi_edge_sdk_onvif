@@ -13,7 +13,7 @@ import datetime
 
 from onvif import ONVIFCamera # python-onvif
 
-ONVIF_GENERIC_PTZ_DRIVER_ID = 'GenericONVIFPTZ'
+ONVIF_GENERIC_PTZ_DRIVER_ID = 'GenericONVIF_PTZ'
 
 class OnvifIFPanTiltDriver(object):
     WSDL_FOLDER = "/opt/nepi/ros/etc/onvif/wsdl/"
@@ -21,8 +21,6 @@ class OnvifIFPanTiltDriver(object):
     PT_DIRECTION_NEGATIVE = -1
     PT_DIRECTION_NONE = 0
     
-    ONVIF_GENERIC_DRIVER_ID = 'GenericONVIF'
-
     def __init__(self, username, password, ip_addr, port=80):
         #print('Debug: Starting GenericONVIF driver')
         self.username = username
