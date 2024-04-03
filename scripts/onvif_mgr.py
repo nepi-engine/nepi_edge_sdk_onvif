@@ -12,10 +12,12 @@ import os
 import subprocess
 import time
 from wsdiscovery.discovery import ThreadedWSDiscovery as WSDiscovery
-from onvif import ONVIFCamera
 import urllib.parse
 import rospy
-import rosparam
+import datetime
+from datetime import timezone
+import requests
+from xml.etree import ElementTree as ET
 
 # DON'T USE SaveCfgIF IN THIS CLASS -- SEE WARNING BELOW
 #from nepi_edge_sdk_base.save_cfg_if import SaveCfgIF
@@ -236,7 +238,7 @@ class ONVIFMgr:
       config = self.configured_onvifs[uuid]
       basename = config['node_base_name']
       rospy.loginfo(f'Resyncing clock for {basename} by request')
-      SyncSystemDateAndTime(device['host'], device['port'], config['username'], config['password'])
+      soapSyncSystemDateAndTime(device['host'], device['port'], config['username'], config['password'])
 
     return EmptyResponse()
   
@@ -373,20 +375,25 @@ class ONVIFMgr:
       rospy.logerr('Incomplete ONVIF configuration for %s... cannot proceed')
       return False
     
-    username = config['username']
-    password = config['password']
     hostname = self.detected_onvifs[uuid]['host']
     port = self.detected_onvifs[uuid]['port']
+    host_reachable = (os.system(f"ping -c 1 {hostname}") == 0)
+    if host_reachable is False:
+      rospy.logwarn(f"ONVIF device at {hostname} is not reachable... incompatible subnet?")
+      return False
+    
+    username = config['username']
+    password = config['password']
 
     try:
-      cam = ONVIFCamera(hostname, port, username, password, self.WSDL_FOLDER)
-      #reported_hostname = cam.devicemgmt.GetHostname()['Name']
+      dev_info = soapGetDeviceInformation(hostname, str(port), username, password)
+      #rospy.logwarn(f'Debug: dev_info = {dev_info}')
+      soapSyncSystemDateAndTime(hostname, str(port), username, password)
       rospy.loginfo('Connected to device %s at %s:%d via configured credentials', uuid, hostname, port)
     except Exception as e:
       rospy.logwarn('Unable to connect to detected ONVIF device %s at %s:%d via configured credentials (%s)', uuid, hostname, port, e)
       return False
     
-    dev_info = cam.devicemgmt.GetDeviceInformation()
     self.detected_onvifs[uuid]['manufacturer'] = dev_info["Manufacturer"]
     self.detected_onvifs[uuid]['model'] = dev_info["Model"]
     self.detected_onvifs[uuid]['firmware_version'] = dev_info["FirmwareVersion"]
@@ -515,6 +522,111 @@ class ONVIFMgr:
     self.autosave_cfg_changes = rospy.get_param('~autosave_cfg_changes', self.autosave_cfg_changes)
     self.configured_onvifs = rospy.get_param('~onvif_devices', self.configured_onvifs)
 
+# Direct SOAP calls
+DEVICE_SERVICE_PATH = "/onvif/device_service"
+
+def soapGetDeviceInformation(globalip, globalport, username, password):
+    soap_env = f"""
+        <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+                    xmlns:t="http://www.onvif.org/ver10/device/wsdl">
+            <s:Header>
+                <Security s:mustUnderstand="false" xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
+                    <UsernameToken>
+                        <Username>{username}</Username>
+                        <Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">{password}</Password>
+                    </UsernameToken>
+                </Security>
+            </s:Header>
+            <s:Body>
+                <t:GetDeviceInformation/>
+            </s:Body>
+        </s:Envelope>
+        """
+    headers = {
+            "Content-Type": "application/soap+xml",
+            "charset": "utf-8",
+            "Content-Length": str(len(soap_env)),
+        }
+
+    # Send HTTP request
+    url = f"http://{globalip}:{globalport}{DEVICE_SERVICE_PATH}"
+    soap_resp = requests.post(url, data=soap_env, headers=headers, timeout=30)
+
+    rospy.logwarn(f'Debug: Got devinfo response {soap_resp.text}')
+    # Initialize to unknown
+    device_info = {
+        "Manufacturer" : "Unknown",
+        "Model" : "Unknown",
+        "FirmwareVersion" : "Unknown",
+        "SerialNumber" : "Unknown",
+        "HardwareId" : "Unknown"
+    }
+
+    if soap_resp.status_code != 200:
+      rospy.logwarn(f'Got error response from onvif device at {globalip} when querying device info')
+      return device_info
+    
+    root = ET.fromstring(soap_resp.content)
+
+    namespaces = {
+        'tds': 'http://www.onvif.org/ver10/device/wsdl',
+    }
+
+    dev_info_xml = root.find('.//tds:GetDeviceInformationResponse', namespaces=namespaces)
+    device_info["Manufacturer"] = dev_info_xml.find('.//tds:Manufacturer', namespaces=namespaces).text
+    device_info["Model"] = dev_info_xml.find('.//tds:Model', namespaces=namespaces).text
+    device_info["FirmwareVersion"] = dev_info_xml.find('.//tds:FirmwareVersion', namespaces=namespaces).text
+    device_info["SerialNumber"] = dev_info_xml.find('.//tds:SerialNumber', namespaces=namespaces).text
+    device_info["HardwareId"] = dev_info_xml.find('.//tds:HardwareId', namespaces=namespaces).text
+
+    return device_info
+
+def soapSyncSystemDateAndTime(globalip, globalport, username, password):
+    now = datetime.datetime.now(timezone.utc)
+    soap_env = f"""
+        <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+                    xmlns:tds="http://www.onvif.org/ver10/device/wsdl"
+                    xmlns:tt="http://www.onvif.org/ver10/schema">
+            <s:Header>
+                <Security s:mustUnderstand="false" xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
+                    <UsernameToken>
+                        <Username>{username}</Username>
+                        <Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">{password}</Password>
+                    </UsernameToken>
+                </Security>
+            </s:Header>
+            <s:Body>
+              <tds:SetSystemDateAndTime>
+                <tds:DateTimeType>Manual</tds:DateTimeType>
+                <tds:DaylightSavings>false</tds:DaylightSavings>
+                <tds:UTCDateTime>
+                  <tt:Time>
+                    <tt:Hour>{now.hour}</tt:Hour>
+                    <tt:Minute>{now.minute}</tt:Minute>
+                    <tt:Second>{now.second}</tt:Second>
+                  </tt:Time>
+                  <tt:Date>
+                    <tt:Year>{now.year}</tt:Year>
+                    <tt:Month>{now.month}</tt:Month>
+                    <tt:Day>{now.day}</tt:Day>
+                  </tt:Date>
+                </tds:UTCDateTime>
+              </tds:SetSystemDateAndTime>
+            </s:Body>
+        </s:Envelope>
+        """
+    headers = {
+            "Content-Type": "application/soap+xml",
+            "charset": "utf-8",
+            "Content-Length": str(len(soap_env)),
+        }
+
+    #rospy.logwarn(f'Debug: Sending SetSystemTimeAndDate soap_env {soap_env}')
+    # Send HTTP request
+    url = f"http://{globalip}:{globalport}{DEVICE_SERVICE_PATH}"
+    soap_resp = requests.post(url, data=soap_env, headers=headers, timeout=30)
+    #rospy.logwarn(f'Debug: Got back {soap_resp.text}')
+ 
 if __name__ == '__main__':
   node = ONVIFMgr()
 
