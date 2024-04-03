@@ -21,10 +21,16 @@ import rosparam
 #from nepi_edge_sdk_base.save_cfg_if import SaveCfgIF
 
 from std_msgs.msg import String
+from std_srvs.srv import Empty, EmptyResponse
 from nepi_ros_interfaces.msg import OnvifDeviceCfg, OnvifDeviceStatus
 from nepi_ros_interfaces.srv import OnvifDeviceListQuery, OnvifDeviceListQueryResponse
 from nepi_ros_interfaces.srv import OnvifDeviceCfgUpdate, OnvifDeviceCfgUpdateResponse
 from nepi_ros_interfaces.srv import OnvifDeviceCfgDelete, OnvifDeviceCfgDeleteResponse
+from nepi_ros_interfaces.srv import OnvifDeviceDriverListQuery, OnvifDeviceDriverListQueryResponse
+OnvifDeviceDriverListQuery
+
+from onvif_camera_node import DRIVER_SPECIALIZATION_CONSTRUCTORS as CAMERA_DRIVER_DICT
+from onvif_pan_tilt_node import DRIVER_SPECIALIZATION_CONSTRUCTORS as PT_DRIVER_DICT
 
 DEBUG_CONFIGURED_ONVIFS_FOR_TEST = {
   '1dd2-11b2-a105-F00000F77CD1': {
@@ -77,6 +83,9 @@ class ONVIFMgr:
     self.detected_onvifs = {}
     self.configured_onvifs = rospy.get_param('~onvif_devices', {})
 
+    self.idx_drivers = CAMERA_DRIVER_DICT.keys()
+    self.ptx_drivers = PT_DRIVER_DICT.keys()
+
     # Testing only
     #rospy.logerr("TESTING: OVERRIDING ~onvif_devices")
     #self.configured_onvifs = DEBUG_CONFIGURED_ONVIFS_FOR_TEST
@@ -99,7 +108,9 @@ class ONVIFMgr:
     rospy.Service('~set_device_cfg', OnvifDeviceCfgUpdate, self.updateDeviceCfgHandler)
     rospy.Service('~delete_device_cfg', OnvifDeviceCfgDelete, self.deleteDeviceCfgHandler)
     rospy.Service('~device_list_query', OnvifDeviceListQuery, self.provideDeviceList)
-
+    rospy.Service('~resync_onvif_device_clocks', Empty, self.resyncOnvifDeviceClocks)
+    rospy.Service('~device_driver_list_query', OnvifDeviceDriverListQuery, self.provideDeviceDriverList)
+    
     # Must handle our own store params rather than offloading to SaveCfgIF per WARNING above
     self.store_params_publisher = rospy.Publisher('store_params', String, queue_size=1)
 
@@ -122,13 +133,20 @@ class ONVIFMgr:
 
     # Make sure the node_base_name is legal ROS
     legal_base_name = device_cfg.node_base_name.replace(' ', '_').replace('-','_')
+
+    # Make sure the specified drivers are known
+    if (device_cfg.idx_driver not in self.idx_drivers) or (device_cfg.ptx_driver not in self.ptx_drivers):
+      rospy.logerr('Unknown driver(s) specified... will not update config')
+      return OnvifDeviceCfgUpdateResponse(success = False)
         
     updated_cfg = {
       'username' : device_cfg.username,
       'password' : device_cfg.password,
       'node_base_name' : legal_base_name,
       'idx_enabled' : device_cfg.idx_enabled,
-      'ptx_enabled' : device_cfg.ptx_enabled
+      'ptx_enabled' : device_cfg.ptx_enabled,
+      'idx_driver' : device_cfg.idx_driver,
+      'ptx_driver' : device_cfg.ptx_driver
     }
     self.configured_onvifs[uuid] = updated_cfg
 
@@ -203,9 +221,30 @@ class ONVIFMgr:
       resp_cfg_for_device.node_base_name = config['node_base_name']
       resp_cfg_for_device.idx_enabled = config['idx_enabled']
       resp_cfg_for_device.ptx_enabled = config['ptx_enabled']
+      resp_cfg_for_device.idx_driver = config['idx_driver']
+      resp_cfg_for_device.ptx_driver = config['ptx_driver']      
       resp.device_cfgs.append(resp_cfg_for_device)
     
-    return resp    
+    return resp
+
+  def resyncOnvifDeviceClocks(self, _):
+    for uuid in self.detected_onvifs:
+      device = self.detected_onvifs[uuid]
+      if (device['connectable'] is False) or  (uuid not in self.configured_onvifs):
+        continue
+      
+      config = self.configured_onvifs[uuid]
+      basename = config['node_base_name']
+      rospy.loginfo(f'Resyncing clock for {basename} by request')
+      SyncSystemDateAndTime(device['host'], device['port'], config['username'], config['password'])
+
+    return EmptyResponse()
+  
+  def provideDeviceDriverList(self, _):
+    resp = OnvifDeviceDriverListQueryResponse()
+    resp.idx_drivers = self.idx_drivers
+    resp.ptx_drivers = self.ptx_drivers
+    return resp
   
   def runDiscovery(self, _):
     #rospy.loginfo('Debug: running discovery')
@@ -377,7 +416,7 @@ class ONVIFMgr:
       ros_node_name = config['node_base_name'] + '_camera'
       fully_qualified_node_name = base_namespace + ros_node_name
       self.checkLoadConfigFile(node_namespace=fully_qualified_node_name)
-      self.overrideConnectionParams(fully_qualified_node_name, username, password, hostname, port)
+      self.overrideConnectionParams(fully_qualified_node_name, username, password, hostname, port, config['idx_driver'])
 
       # And try to launch the node
       p = self.startNode(package=self.NEPI_ROS_ONVIF_PACKAGE, node_type=self.NODE_TYPE_ONVIF_CAMERA, node_name=ros_node_name)
@@ -387,19 +426,20 @@ class ONVIFMgr:
       ros_node_name = config['node_base_name'] + '_pan_tilt'
       fully_qualified_node_name = base_namespace + ros_node_name
       self.checkLoadConfigFile(node_namespace=fully_qualified_node_name)
-      self.overrideConnectionParams(fully_qualified_node_name, username, password, hostname, port)
+      self.overrideConnectionParams(fully_qualified_node_name, username, password, hostname, port, config['ptx_driver'])
 
       # And try to launch the node
       p = self.startNode(package=self.NEPI_ROS_ONVIF_PACKAGE, node_type=self.NODE_TYPE_ONVIF_PTX, node_name=ros_node_name)
       self.detected_onvifs[uuid]['ptx_subproc'] = p
 
-  def overrideConnectionParams(self, fully_qualified_node_name, username, password, hostname, port):
+  def overrideConnectionParams(self, fully_qualified_node_name, username, password, hostname, port, driver_id):
     credentials_ns = fully_qualified_node_name + '/credentials/'
     network_ns = fully_qualified_node_name + '/network/'
     rospy.set_param(credentials_ns + 'username', username)
     rospy.set_param(credentials_ns + 'password', password)
     rospy.set_param(network_ns + 'host', hostname)
     rospy.set_param(network_ns + 'port', port)
+    rospy.set_param(fully_qualified_node_name + '/driver_id', driver_id)
 
   def startNode(self, package, node_type, node_name):
     node_namespace = rospy.get_namespace() + node_name

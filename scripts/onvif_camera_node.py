@@ -16,11 +16,10 @@ from nepi_edge_sdk_base.idx_sensor_if import ROSIDXSensorIF
 from nepi_edge_sdk_onvif.onvif_cam_driver import ONVIF_GENERIC_DRIVER_ID, OnvifIFCamDriver
 from nepi_edge_sdk_onvif.econ_routecam_driver import ECON_ROUTECAM_DRIVER_ID, EConRouteCamDriver
 
+DRIVER_SPECIALIZATION_CONSTRUCTORS = {ONVIF_GENERIC_DRIVER_ID: OnvifIFCamDriver,
+                                      ECON_ROUTECAM_DRIVER_ID: EConRouteCamDriver}
 class OnvifCameraNode:
     DEFAULT_NODE_NAME = "onvif_camera_node"
-
-    DRIVER_SPECIALIZATION_CONSTRUCTORS = {ONVIF_GENERIC_DRIVER_ID: OnvifIFCamDriver,
-                                          ECON_ROUTECAM_DRIVER_ID: EConRouteCamDriver}
 
     def __init__(self):
         # Launch the ROS node
@@ -38,6 +37,9 @@ class OnvifCameraNode:
         if not rospy.has_param('~network/host'):
             rospy.logerr(self.node_name + ": Missing network/host parameter... cannot start")
             return
+        if not rospy.has_param('~driver_id'):
+            rospy.logerr(self.node_name + ": Missing driver_id parameter... cannot start")
+            return
                 
         username = str(rospy.get_param('~credentials/username'))
         password = str(rospy.get_param('~credentials/password'))
@@ -48,12 +50,11 @@ class OnvifCameraNode:
         rospy.set_param('~/network/port', onvif_port)
 
         # Set up for specialized drivers here
-        self.driver_id = rospy.get_param('~driver_id', ONVIF_GENERIC_DRIVER_ID)
-        rospy.set_param('~driver_id', self.driver_id)
-        if self.driver_id not in self.DRIVER_SPECIALIZATION_CONSTRUCTORS:
+        self.driver_id = rospy.get_param('~driver_id')
+        if self.driver_id not in DRIVER_SPECIALIZATION_CONSTRUCTORS:
             rospy.logerr(self.node_name + ": unknown driver_id " + self.driver_id)
             return
-        DriverConstructor = self.DRIVER_SPECIALIZATION_CONSTRUCTORS[self.driver_id]
+        DriverConstructor = DRIVER_SPECIALIZATION_CONSTRUCTORS[self.driver_id]
 
         # Start the driver to connect to the camera
         rospy.loginfo(self.node_name + ": Launching " + self.driver_id + " driver")
