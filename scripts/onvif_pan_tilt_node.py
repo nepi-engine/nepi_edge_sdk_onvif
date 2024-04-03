@@ -193,7 +193,7 @@ class OnvifPanTiltNode:
         self.speed_ratio = 1.0
         self.home_yaw_deg = 0.0
         self.home_pitch_deg = 0.0
-        self.waypoints = [] # List of dictionaries with waypoint_pitch, waypoint_yaw
+        self.waypoints = {} # Dictionary of dictionaries with numerical key and {waypoint_pitch, waypoint_yaw} dict value
 
         # Set up save_cfg interface
         self.save_cfg_if = SaveCfgIF(updateParamsCallback=self.setCurrentSettingsAsDefault, paramsModifiedCallback=self.updateFromParamServer)
