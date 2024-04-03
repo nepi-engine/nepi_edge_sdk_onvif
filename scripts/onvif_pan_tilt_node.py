@@ -12,6 +12,7 @@ import rospy
 
 from nepi_edge_sdk_ptx.ptx_if import ROSPTXActuatorIF
 from nepi_edge_sdk_onvif.onvif_pan_tilt_driver import ONVIF_GENERIC_PTZ_DRIVER_ID, OnvifIFPanTiltDriver
+from nepi_edge_sdk_onvif.sidus_ss109ht_pan_tilt_driver import SIDUS_SS109HT_PTZ_DRIVER_ID, SidusSS109HTPTZ
 from nepi_edge_sdk_base.save_cfg_if import SaveCfgIF
 
 DRIVER_SPECIALIZATION_CONSTRUCTORS = {ONVIF_GENERIC_PTZ_DRIVER_ID: OnvifIFPanTiltDriver,
@@ -19,7 +20,7 @@ DRIVER_SPECIALIZATION_CONSTRUCTORS = {ONVIF_GENERIC_PTZ_DRIVER_ID: OnvifIFPanTil
 class OnvifPanTiltNode:
     DEFAULT_NODE_NAME = "onvif_pan_tilt"
 
-    DEFAULT_STATUS_UPDATE_RATE_HZ = 10.0 # Hz
+    DEFAULT_STATUS_UPDATE_RATE_HZ = 1.0 # Low default rate -- some devices lock up if you try this at too high of a rate
 
     def __init__(self):
         # Launch the ROS node
