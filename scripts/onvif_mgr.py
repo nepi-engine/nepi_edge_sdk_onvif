@@ -153,12 +153,13 @@ class ONVIFMgr:
     self.configured_onvifs[uuid] = updated_cfg
 
     # Now remove the device from the list of detected devices so that it can be rediscovered and properly connected and nodes launched
-    # using this updated config. But if nodes are already running, just warn user; don't stop and restart them.
+    # using this updated config. If nodes are already running, stop them (to restart as newly-configured) and warn user
     if detected_device:
       if (detected_device['idx_subproc'] is not None) or (detected_device['ptx_subproc'] is not None):
-        rospy.logwarn('Config. for %s is updated, but not restarting already-running nodes', uuid)
-      else:
-        self.detected_onvifs.pop(uuid)
+        rospy.logwarn('Config. for %s is updated, will restart any already-running nodes', uuid)
+        self.stopAndPurgeNodes(uuid)
+      
+      self.detected_onvifs.pop(uuid)
 
     # Must handle our own saving since topics don't work in this class (see WARNING above)
     if self.autosave_cfg_changes is True:
@@ -256,7 +257,8 @@ class ONVIFMgr:
         
     detected_services = self.wsd.searchServices()
     #detected_services = self.wsd.searchServices(scopes=self.ONVIF_SCOPES)
-            
+    #rospy.logwarn('Debug: Discovered %d services', len(detected_services))
+
     detected_uuids = []
     for service in detected_services:
       endpoint_ref = service.getEPR()
@@ -328,10 +330,8 @@ class ONVIFMgr:
 
         # Now determine if it has a config struct
         self.detected_onvifs[uuid]['config'] = self.configured_onvifs[uuid] if uuid in self.configured_onvifs else None
-        if self.detected_onvifs[uuid]['config'] is None:
-          self.detected_onvifs[uuid]['connectable'] = False
-        else:
-          # Update the status to indicate
+        if self.detected_onvifs[uuid]['config'] is not None:
+          # Check if this device can be reached
           self.detected_onvifs[uuid]['connectable'] = self.attemptONVIFConnection(uuid)
 
     lost_onvifs = []
@@ -351,6 +351,13 @@ class ONVIFMgr:
         #rospy.loginfo(60, 'No manager configuration for device at %s:%d... not managing this device currently', detected['host'], detected['port'])
         continue
 
+      # If not yet connectable, try again here, but don't proceed if still not connectable
+      if detected['connectable'] is False:
+        self.detected_onvifs[uuid]['connectable'] = self.attemptONVIFConnection(uuid)
+      if not self.detected_onvifs[uuid]['connectable']:
+        # Warning logged upstream
+        continue
+
       needs_idx_start = (detected['video'] is True) and (detected['idx_subproc'] is None) and \
                         (detected['config'] is not None) and ('idx_enabled' in detected['config']) and \
                         (detected['config']['idx_enabled'] is True)
@@ -362,8 +369,17 @@ class ONVIFMgr:
       if needs_start:
         # Device is connectable, so attempt to start the node(s), 
         self.startNodesForDevice(uuid=uuid, start_idx = needs_idx_start, start_ptx = needs_ptx_start)
+      
+      needs_restart = False
+      if (detected['idx_subproc'] is not None) and (self.subprocessIsRunning(detected['idx_subproc']) is False):
+        rospy.logwarn('IDX node for {uuid} unexpectedly not running... will force restart')
+        needs_restart = True
+      if (detected['ptx_subproc'] is not None) and (self.subprocessIsRunning(detected['idx_subproc']) is False):
+        rospy.logwarn('PTX node for {uuid} unexpectedly not running... will force restart')
+        needs_restart = True
 
-    # TODO: Check for a required subproc restart if a node is supposed to be running, but self.subprocessIsRunning() is false?
+      if needs_restart is True:
+        self.stopAndPurgeNodes(uuid)
         
     # Finally, purge lost device from our set... can't do it in the detection loop above because it would modify the object 
     # that is being iterated over; throws exception.
