@@ -375,6 +375,20 @@ class SidusSS109HTPTZ(object):
         tilt_speed_ratio = tilt_direction * speed_ratio
         soapPTZContinuous(self.ip_addr, self.port_str, self.username, self.password, self.profile_token, pan_speed_ratio, tilt_speed_ratio)
 
+    def getPositionLimitsInDegrees(self):
+        # For this generic driver, can only set these to some arbitrary value. Users can override in the device's config file (after saving one as necessary)
+        position_limits_deg = {
+            'max_yaw_hardstop_deg' : 180.0,
+            'min_yaw_hardstop_deg' : -180.0,
+            'max_pitch_hardstop_deg' : 180.0,
+            'min_pitch_hardstop_deg' : -180.0,
+            'max_yaw_softstop_deg' : 179.9,
+            'min_yaw_softstop_deg' : -179.9,
+            'max_pitch_softstop_deg' : 179.9,
+            'min_pitch_softstop_deg' : -179.9
+        }
+        return position_limits_deg
+    
     def moveToPosition(self, pan_position_ratio, tilt_position_ratio, speed_ratio):
         #print(f'Debug: sidus_driver moveToPosition ({pan_position_ratio},{tilt_position_ratio})')
         soapPTZ(self.ip_addr, self.port_str, self.username, self.password, self.profile_token, speed_ratio, pan_position_ratio, tilt_position_ratio)

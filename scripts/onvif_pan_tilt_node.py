@@ -85,10 +85,28 @@ class OnvifPanTiltNode:
             'status_update_rate_hz' : self.DEFAULT_STATUS_UPDATE_RATE_HZ
         }
 
-        # TODO: Absolute position limits (hard and soft) in default_settings (see ptx_if.py). 
-        # ONVIF spec. reports absolute limits in terms of [-1.0,1.0] ratio so seems we'll need 
-        # some additional config. params to map these to physical units (degrees, etc.)
-
+        # Driver can specify position limits via getPositionLimitsInDegrees. Otherwise, we hard-code them 
+        # to arbitrary values here, but can be overridden in device config file (see ptx_if.py)
+        if hasattr(self.driver, 'getPositionLimitsInDegrees'):
+            driver_specified_limits = self.driver.getPositionLimitsInDegrees()
+            default_settings['max_yaw_hardstop_deg'] = driver_specified_limits['max_yaw_hardstop_deg']
+            default_settings['min_yaw_hardstop_deg'] = driver_specified_limits['min_yaw_hardstop_deg']
+            default_settings['max_pitch_hardstop_deg'] = driver_specified_limits['max_pitch_hardstop_deg']
+            default_settings['min_pitch_hardstop_deg'] = driver_specified_limits['min_pitch_hardstop_deg']
+            default_settings['max_yaw_softstop_deg'] = driver_specified_limits['max_yaw_softstop_deg']
+            default_settings['min_yaw_softstop_deg'] = driver_specified_limits['min_yaw_softstop_deg']
+            default_settings['max_pitch_softstop_deg'] = driver_specified_limits['max_pitch_softstop_deg']
+            default_settings['min_pitch_softstop_deg'] = driver_specified_limits['min_pitch_softstop_deg']
+        else:
+            default_settings['max_yaw_hardstop_deg'] = 60.0
+            default_settings['min_yaw_hardstop_deg'] = -60.0
+            default_settings['max_pitch_hardstop_deg'] = 60.0
+            default_settings['min_pitch_hardstop_deg'] = -60.0
+            default_settings['max_yaw_softstop_deg'] = 59.0
+            default_settings['min_yaw_softstop_deg'] = -59.0
+            default_settings['max_pitch_softstop_deg'] = 59.0
+            default_settings['min_pitch_softstop_deg'] = -59.0
+                
         ptx_callback_names = {
             # PTX Standard
             "StopMoving": self.stopMoving,
