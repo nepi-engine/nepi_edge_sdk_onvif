@@ -215,7 +215,6 @@ class OnvifCameraNode:
             self.resolution_mode_map[2] = available_resolutions[2*resolution_step]
 
         rospy.loginfo(self.node_name + ": Resolution Modes" )
-        rospy.logerr('Debug ' + self.node_name + ": Resolution Modes" )
         for i in range(resolution_mode_count):
             rospy.loginfo("\t" + str(i) + ": " +  str(self.resolution_mode_map[i]['Width']) + 'x' + str(self.resolution_mode_map[i]['Height']))
     

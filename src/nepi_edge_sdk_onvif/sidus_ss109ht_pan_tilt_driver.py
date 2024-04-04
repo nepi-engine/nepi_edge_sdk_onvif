@@ -376,7 +376,7 @@ class SidusSS109HTPTZ(object):
         soapPTZContinuous(self.ip_addr, self.port_str, self.username, self.password, self.profile_token, pan_speed_ratio, tilt_speed_ratio)
 
     def moveToPosition(self, pan_position_ratio, tilt_position_ratio, speed_ratio):
-        print(f'Debug: sidus_driver moveToPosition ({pan_position_ratio},{tilt_position_ratio})')
+        #print(f'Debug: sidus_driver moveToPosition ({pan_position_ratio},{tilt_position_ratio})')
         soapPTZ(self.ip_addr, self.port_str, self.username, self.password, self.profile_token, speed_ratio, pan_position_ratio, tilt_position_ratio)
 
     def getCurrentPosition(self):
