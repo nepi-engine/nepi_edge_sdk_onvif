@@ -138,7 +138,7 @@ class ONVIFMgr:
 
     # Make sure the specified drivers are known
     if (device_cfg.idx_driver not in self.idx_drivers) or (device_cfg.ptx_driver not in self.ptx_drivers):
-      rospy.logerr('Unknown driver(s) specified... will not update config')
+      rospy.logerr(f'Unknown driver(s) specified ({device_cfg.idx_driver}, {device_cfg.ptx_driver})... will not update config')
       return OnvifDeviceCfgUpdateResponse(success = False)
         
     updated_cfg = {
