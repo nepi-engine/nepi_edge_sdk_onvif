@@ -40,8 +40,6 @@ class OnvifCameraNode:
     stop_range_ratio = None,
     min_range_m = None,
     max_range_m = None,
-    zoom_ratio = None, 
-    rotate_ratio = None,
     frame_id = None
     )
  
