@@ -73,6 +73,8 @@ class ONVIFMgr:
   ONVIF_SCOPE_NVT_ALT_ID = 'NetworkVideoTransmitter' # ONVIF spec. says this name is legal for NVT, too
   ONVIF_SCOPE_PTZ_ID = 'ptz'
 
+  device_name_dict = dict()
+
   def __init__(self):
     # Launch the ROS node
     rospy.init_node(name=self.DEFAULT_NODE_NAME) # Node name could be overridden via remapping
@@ -141,7 +143,10 @@ class ONVIFMgr:
       rospy.logerr(f'Unknown driver(s) specified ({device_cfg.idx_driver}, {device_cfg.ptx_driver})... will not update config')
       return OnvifDeviceCfgUpdateResponse(success = False)
         
+    device_name = self.device_name_dict[uuid]
+
     updated_cfg = {
+      'device_name' : device_name,
       'username' : device_cfg.username,
       'password' : device_cfg.password,
       'node_base_name' : legal_base_name,
@@ -195,9 +200,14 @@ class ONVIFMgr:
 
     # Statuses of detected devices
     for uuid in self.detected_onvifs:
+      device = self.detected_onvifs[uuid]
       resp_status_for_device = OnvifDeviceStatus()
       resp_status_for_device.uuid = uuid
-      device = self.detected_onvifs[uuid]
+      if uuid in self.device_name_dict.keys():
+        resp_status_for_device.device_name = self.device_name_dict[uuid]
+      else:
+        resp_status_for_device.device_name = uuid
+
       
       # Manufacturer settings
       resp_status_for_device.manufacturer = device['manufacturer']
@@ -219,6 +229,10 @@ class ONVIFMgr:
       resp_cfg_for_device.uuid = uuid
     
       config = self.configured_onvifs[uuid]
+      if uuid in self.device_name_dict.keys():
+        resp_cfg_for_device.device_name = self.device_name_dict[uuid]
+      else:
+        resp_cfg_for_device.device_name = uuid
       resp_cfg_for_device.username = config['username']
       resp_cfg_for_device.password = config['password']
       resp_cfg_for_device.node_base_name = config['node_base_name']
@@ -422,6 +436,7 @@ class ONVIFMgr:
     self.detected_onvifs[uuid]['model'] = dev_info["Model"]
     self.detected_onvifs[uuid]['firmware_version'] = dev_info["FirmwareVersion"]
     self.detected_onvifs[uuid]['hardware_id'] = dev_info["HardwareId"]
+    self.detected_onvifs[uuid]['serial_num'] = dev_info["SerialNumber"]
 
     return True    
 
@@ -434,6 +449,8 @@ class ONVIFMgr:
     if (config is None) or ('node_base_name' not in config) or ('username' not in config) or ('password' not in config):
       rospy.logerr('Incomplete configuration for %s... cannot proceed')
       return False
+      
+    serial_num = self.detected_onvifs[uuid]['serial_num'] 
     
     base_namespace = rospy.get_namespace()
 
@@ -443,8 +460,12 @@ class ONVIFMgr:
     hostname = self.detected_onvifs[uuid]['host']
     port = self.detected_onvifs[uuid]['port']
     
+    identifier = hostname.replace(".","")
+    device_name = config['node_base_name'] + '_' + identifier
+    rospy.loginfo(device_name)
+    self.device_name_dict[uuid] = device_name
     if start_idx is True:
-      ros_node_name = config['node_base_name'] + '_camera'
+      ros_node_name = config['node_base_name'] + '_camera_' + identifier
       fully_qualified_node_name = base_namespace + ros_node_name
       self.checkLoadConfigFile(node_namespace=fully_qualified_node_name)
       self.overrideConnectionParams(fully_qualified_node_name, username, password, hostname, port, config['idx_driver'])
@@ -454,7 +475,7 @@ class ONVIFMgr:
       self.detected_onvifs[uuid]['idx_subproc'] = p
 
     if start_ptx is True:
-      ros_node_name = config['node_base_name'] + '_pan_tilt'
+      ros_node_name = config['node_base_name'] + '_pan_tilt_' + identifier
       fully_qualified_node_name = base_namespace + ros_node_name
       self.checkLoadConfigFile(node_namespace=fully_qualified_node_name)
       self.overrideConnectionParams(fully_qualified_node_name, username, password, hostname, port, config['ptx_driver'])

@@ -9,23 +9,21 @@
 #
 
 import time
+import rospy
 import cv2
 import threading
 import os
+import copy
 from onvif import ONVIFCamera # python-onvif
 
-# Utilities
-def computeScaledFromUnscaled(unscaled, min_unscaled, max_unscaled):
-    scaled = (unscaled - min_unscaled) / (max_unscaled - min_unscaled)
-    return scaled
-
-def computeUnscaledFromScaled(scaled, min_unscaled, max_unscaled, force_integer=True):
-    unscaled = (scaled * (max_unscaled - min_unscaled)) + min_unscaled
-    if force_integer is True:
-        unscaled = round(unscaled)
-    return unscaled
 
 ONVIF_GENERIC_DRIVER_ID = 'GenericONVIF_NVT'
+
+CONTROL_NAME_OVERRIDES = dict(IrCutFilterModes = "IrCutFilter",
+                              WhiteBalance_YrGain = "WhiteBalance_CrGain",
+                              WhiteBalance_YbGain = "WhiteBalance_CbGain" )
+       
+        
 
 class OnvifIFCamDriver(object):
     #WSDL_FOLDER = "/home/josh/Desktop/Work/tmp/onvif_practice/python-onvif/wsdl/" # TODO: Update to the real location as installed via python-onvif
@@ -34,17 +32,17 @@ class OnvifIFCamDriver(object):
     MAX_CONSEC_FRAME_FAIL_COUNT = 3
 
     def __init__(self, username, password, ip_addr, port=80):
+        rospy.loginfo("Starting ONVIF Cam Driver Setup")
         self.username = username
         self.password = password
-
         # Connect to the camera
         self.cam = ONVIFCamera(ip_addr, port, username, password, self.WSDL_FOLDER)
         # The devicemgt service gets set up automatically
         self.device_info = self.cam.devicemgmt.GetDeviceInformation()
         # COMMENTING THIS OUT: Seems to MAYBE be causing a problem with an ONWOTE Camera we have and we aren't using the return value and
         # ONVIF docs say this function is deprecated anyway: https://www.onvif.org/ver10/device/wsdl/devicemgmt.wsdl
-        #self.device_capabilities = self.cam.devicemgmt.GetCapabilities()
-        #print("Debugging: Sys Capabilities = " + str(self.device_capabilities))
+        self.device_capabilities = self.cam.devicemgmt.GetCapabilities()
+        #rospy.loginfo("Device Provided Capabilities " + str(self.device_capabilities))
         
         # Other services require manual setup
         # TODO: Are all of these services guaranteed to exist, or should we use self.cam.devicemgmt.GetServices() to check?
@@ -58,8 +56,70 @@ class OnvifIFCamDriver(object):
         video_src_token_param = {"VideoSourceToken":self.video_source.token}
         #self.imaging_settings = self.imaging_service.GetImagingSettings(video_src_token_param)
         self.imaging_options = self.imaging_service.GetOptions(video_src_token_param)
-        #print("Debugging: Imaging Options = " + str(self.imaging_options))
+        #rospy.loginfo("Imaging Device Options = " + str(self.imaging_options))
         
+        rospy.loginfo("*************************")
+        rospy.loginfo("Building Controls Dict")
+        self.camera_controls = dict()
+        for name in self.imaging_options:
+            #rospy.loginfo(name)
+            option_type = type(self.imaging_options[name]).__name__
+            #rospy.loginfo("option type: " + option_type)
+            if option_type.find('Options20') != -1:
+                for sub_name in self.imaging_options[name]:
+                    if len(self.imaging_options[name]) > 1:
+                        ctrl_name = (name + "_" + sub_name)
+                    else:
+                        ctrl_name = name
+                    if ctrl_name in CONTROL_NAME_OVERRIDES: # Apply Name overide
+                        ctrl_name = CONTROL_NAME_OVERRIDES[ctrl_name]
+                    sub_option_type = type(self.imaging_options[name][sub_name]).__name__
+                    #rospy.loginfo(ctrl_name)
+                    #rospy.loginfo("sub_option type: " + sub_option_type)
+                    sub_option_str = str(self.imaging_options[name][sub_name])
+                    #rospy.loginfo("sub_option data: " + sub_option_str)
+                    entry = self.create_ctrl_entry(sub_name,sub_option_type,self.imaging_options[name][sub_name])
+                    if len(entry) != 0:
+                        self.camera_controls[ctrl_name] = entry
+                        #entry_str = str(entry)
+                        #rospy.loginfo(" New control added: " + ctrl_name + " : " + entry_str)
+            else: 
+                ctrl_name = name
+                if ctrl_name in CONTROL_NAME_OVERRIDES: # Apply Name overide
+                    ctrl_name = CONTROL_NAME_OVERRIDES[ctrl_name]
+                #rospy.loginfo(ctrl_name)
+                #rospy.loginfo("option type: " + option_type)
+                entry = self.create_ctrl_entry(name,option_type,self.imaging_options[name])
+                if len(entry) != 0:
+                    self.camera_controls[ctrl_name] = entry
+                    #entry_str = str(entry)
+                    #rospy.loginfo(" New control added: " + ctrl_name + " : " + entry_str)
+        
+  
+        # Update controls with current values
+        self.camera_controls = self.getCameraControls()
+
+        #rospy.loginfo("Updating Controls Dict with current values")
+        #for ctrl_name in self.camera_controls.keys():
+            #ctrl_str = str(self.camera_controls[ctrl_name])
+            #rospy.loginfo(ctrl_name + " : " + ctrl_str)
+        
+        '''
+        # Test updating a few settings
+        rospy.loginfo("Test updating values")
+        print(self.setCameraControl("Brightness",150))
+        print(self.setCameraControl("Exposure_ExposureTime",150))
+        print(self.setCameraControl("IrCutFilter","AUTO"))
+        print(self.setCameraControl("WhiteBalance_Mode","MANUAL"))
+        # Update controls with current values
+        self.camera_controls = self.getCameraControls()
+        rospy.loginfo("Controls Dict after test updates")
+        for ctrl_name in self.camera_controls.keys():
+            ctrl_str = str(self.camera_controls[ctrl_name])
+            rospy.loginfo(ctrl_name + " : " + ctrl_str)
+        '''
+
+ 
         # Debugging only
         #self.media_service.GetVideoEncoderConfigurations()))
         
@@ -111,9 +171,119 @@ class OnvifIFCamDriver(object):
         if ret is False:
             raise RuntimeError("Failed to prime image acquisition: " + msg)
         self.stopImageAcquisition(0)
+        rospy.loginfo("Onvif Cam Driver setup complete")
+
+    def create_ctrl_entry(self,ctrl_name,ctrl_type,ctrl,num_value=-999,str_value="UnKnown"):
+        entry = dict()
+        if ctrl_name[0] != '_' and ctrl_name.find("Min") == -1 and ctrl_name.find("Max") == -1 :
+            if ctrl_type != "NoneType":
+                if ctrl_type == "list":
+                    if len(ctrl) > 1:
+                        entry['options'] = ctrl
+                        entry["type"] = "discrete"
+                        entry['value'] = str_value
+                    else:
+                        entry['value'] = "Not Supported"
+                else:
+                    try:
+                        entry["min"] = ctrl.Min
+                        entry["max"] = ctrl.Max
+                        entry['type'] = type(entry["min"]).__name__
+                        entry['value'] = num_value
+                    except:
+                        pass
+            else:
+                entry['value'] = "Not Supported"
+        return entry
 
     def getDeviceInfo(self):
         return self.device_info
+
+    def getCameraControls(self):
+        # update values to current settings
+        for ctrl_name in self.camera_controls.keys():
+            if self.camera_controls[ctrl_name]['value'] != "Not Supported":
+                val = self.getCameraControl(ctrl_name)
+                self.camera_controls[ctrl_name]['value'] = val
+        return self.camera_controls
+
+    def getCameraControl(self, ctrl_name):
+        val = "Not Supported"
+        if ctrl_name.find("_") != -1:
+            [name,sub_name] = ctrl_name.split("_")
+        else:
+            name = ctrl_name
+            sub_name = None
+        # Make sure to query the system first
+        video_src_token_param = {"VideoSourceToken":self.video_source.token}
+        imaging_settings = self.imaging_service.GetImagingSettings(video_src_token_param)
+        if not hasattr(imaging_settings, name):
+            #rospy.loginfo(imaging_settings)
+            return "Not Supported1"
+        val = imaging_settings[name]
+        #rospy.loginfo(str(val))
+        if sub_name != None and hasattr(val,sub_name):
+            val = val[sub_name]
+        if val == None:
+            val = "Not Supported2"
+        return val
+    
+    def setCameraControl(self, ctrl_name, val, readback_check=True, force_integer=True):        
+        #rospy.loginfo("******Driver Update Function******")
+        #rospy.loginfo(ctrl_name)
+        #rospy.loginfo(val)
+        
+        if ctrl_name.find("_") != -1:
+            [name,sub_name] = ctrl_name.split("_")
+        else:
+            name = ctrl_name
+            sub_name = None
+
+        #rospy.loginfo(name)
+        #rospy.loginfo(sub_name)
+
+        # Bounds checking:
+        # Make sure to query the system first
+        video_src_token_param = {"VideoSourceToken":self.video_source.token}
+        imaging_settings = self.imaging_service.GetImagingSettings(video_src_token_param)
+
+        if not hasattr(imaging_settings, name):
+            rospy.loginfo("1")
+            return False, "Unavailable setting: " + name
+        elif sub_name != None:
+            if sub_name not in imaging_settings[name]:
+                rospy.loginfo("2")
+                return False, "Unavailable sub setting: " + sub_name
+        
+        setting = imaging_settings[name] 
+        if sub_name == None:
+            new_setting = val
+        else:
+            new_setting = copy.deepcopy(imaging_settings[name])
+            new_setting[sub_name] = val
+
+        #setting_str = str(setting)
+        #new_setting_str = str(new_setting)
+        #rospy.loginfo("Will try setting " + name + " from " + setting_str + " to " + new_setting_str)
+                
+        if new_setting == setting:
+            rospy.loginfo("3")
+            return True, "Success: Desired " + name + " already set"
+
+        
+        new_imaging_settings = {"VideoSourceToken":self.video_source.token, "ImagingSettings":{name: new_setting}}
+        try:
+            self.imaging_service.SetImagingSettings(new_imaging_settings)
+        except Exception as e:
+            rospy.loginfo("4")
+            return False, "Onvif error: Failed to update " + name + " to " + new_setting_str + " - " + str(e)()
+        
+        if readback_check is True:
+            readback = self.imaging_service.GetImagingSettings(video_src_token_param)[name]
+            if (readback != new_setting):
+                return False, name + " not updated by camera"
+
+        return True, "Success"
 
     def imageAcquisitionRunning(self, uri_index = 0):
         if uri_index < 0 or uri_index > len(self.rtsp_uris) - 1:
@@ -257,60 +427,31 @@ class OnvifIFCamDriver(object):
         framerate_range, _ = self.getFramerateRange()
         return (len(framerate_range) > 1)
 
-    def hasAdjustableImagingSetting(self, onvif_setting_name, onvif_subsetting_name=None):
-        if (not hasattr(self.imaging_options, onvif_setting_name)) or (self.imaging_options[onvif_setting_name] is None):
-            return False
-        
-        if (onvif_subsetting_name is not None) and \
-           ((not hasattr(self.imaging_options[onvif_setting_name], onvif_subsetting_name)) or \
-            (self.imaging_options[onvif_setting_name][onvif_subsetting_name] is None)):
-            return False
-        
-        return True                                        
-                
-    def hasAdjustableContrast(self):
-        return self.hasAdjustableImagingSetting("Contrast")
-        
-    def hasAdjustableBrightness(self):
-        return self.hasAdjustableImagingSetting("Brightness")
-    
-    def hasAdjustableSharpness(self):
-        return self.hasAdjustableImagingSetting("Sharpness")
-        
-    def hasAdjustableExposureTime(self):
-        return (self.hasAdjustableImagingSetting("Exposure", "Mode") and self.hasAdjustableImagingSetting("Exposure", "ExposureTime"))
-        
-    def hasAdjustableBacklightCompensation(self):
-        return self.hasAdjustableImagingSetting("BacklightCompensation", "Mode") and self.hasAdjustableImagingSetting("BacklightCompensation" and "Level")
-        
-    def hasAdjustableWideDynamicRange(self):
-        self.hasAdjustableImagingSetting("WideDynamicRange", "Mode") and self.hasAdjustableImagingSetting("WideDynamicRange" and "Level")
-
     def getAvailableResolutions(self, video_encoder_id=0):
         if video_encoder_id >= self.encoder_count:
-            return [], None
+            return False, [], None
         
         # First, figure out what compression format is available for this encoder
         encoding, encoder_cfg = self.getEncoding(video_encoder_id)
                         
         if not hasattr(self.encoder_options, encoding):
-            return [], encoder_cfg
+            return False, [], encoder_cfg
 
         # Now figure out which resolutions are available for this compression... just use the member variable since "options" don't change
         available_resolutions = self.encoder_options[encoding].ResolutionsAvailable
         # available_resolution: List of dictionaries: [{Width:x,Height:y}, ...]
-        return available_resolutions, encoder_cfg # Convenient to return the encoder config, too
+        return True, available_resolutions, encoder_cfg # Convenient to return the encoder config, too
         
     
     def getResolution(self, video_encoder_id=0):
         if video_encoder_id >= self.encoder_count:
-            return []
+            return False, []
         
         encoder_cfg = self.media_service.GetVideoEncoderConfigurations()[video_encoder_id]
         
         # resolution: Dictionary: [{Width:x, Height:x}]
         resolution = encoder_cfg.Resolution
-        return resolution
+        return True, resolution
 
     # Method broken for SS400 -- camera nacks the request packets
     def setResolution(self, resolution, video_encoder_id=0, readback_check=True):
@@ -318,7 +459,7 @@ class OnvifIFCamDriver(object):
             return False, "Device does not support resolution adjustment"
 
         # First, get the available resolutions and current encoder_cfg so that we can update just the resolution
-        available_resolutions, encoder_cfg = self.getAvailableResolutions(video_encoder_id)
+        success, available_resolutions, encoder_cfg = self.getAvailableResolutions(video_encoder_id)
         
         # Ensure that the specified resolution is available
         if resolution not in available_resolutions:
@@ -411,193 +552,7 @@ class OnvifIFCamDriver(object):
             
         return True, "Success"
 
-    def getScaledImageSetting(self, onvif_setting_name, onvif_setting_subname=None):
-        # Make sure to query the system first
-        video_src_token_param = {"VideoSourceToken":self.video_source.token}
-        imaging_settings = self.imaging_service.GetImagingSettings(video_src_token_param)
-
-        if not hasattr(imaging_settings, onvif_setting_name):
-            return -1.0
-        
-        unscaled = imaging_settings[onvif_setting_name]
-        scaled = computeScaledFromUnscaled(unscaled, self.imaging_options[onvif_setting_name].Min, self.imaging_options[onvif_setting_name].Max)
-        return scaled
-    
-    def setScaledImageSetting(self, onvif_setting_name, scaled_value, readback_check=True, force_integer=True):
-        # Bounds checking:
-        if scaled_value < 0.0 or scaled_value > 1.0:
-            return False, "Invalid scaled value for " + onvif_setting_name
-
-        # Make sure to query the system first
-        video_src_token_param = {"VideoSourceToken":self.video_source.token}
-        imaging_settings = self.imaging_service.GetImagingSettings(video_src_token_param)
-        #print("Debugging: Imaging Settings: ")
-        #print(imaging_settings)
-
-        if not hasattr(imaging_settings, onvif_setting_name):
-            return False, "Unavailable setting: " + onvif_setting_name
-        
-        unscaled = computeUnscaledFromScaled(scaled_value, self.imaging_options[onvif_setting_name].Min, self.imaging_options[onvif_setting_name].Max, force_integer)
-                
-        if unscaled == imaging_settings[onvif_setting_name]:
-            return True, "Success: Desired " + onvif_setting_name + " already set"
-        
-        new_imaging_settings = {"VideoSourceToken":self.video_source.token, "ImagingSettings":{onvif_setting_name: unscaled}}
-        try:
-            self.imaging_service.SetImagingSettings(new_imaging_settings)
-        except Exception as e:
-            return False, "Onvif error: Failed to update " + onvif_setting_name + " - " + str(e)()
-        
-        if readback_check is True:
-            unscaled_readback = self.imaging_service.GetImagingSettings(video_src_token_param)[onvif_setting_name]
-            if (unscaled_readback != unscaled):
-                #print("Debugging: Attempted = " + str(unscaled) + ", Returned = " + str(unscaled_readback))
-                #print("Debugging: Limits = [" + str(self.imaging_options[onvif_setting_name].Min) + "," + str(self.imaging_options[onvif_setting_name].Max) + "]")
-                return False, onvif_setting_name + " not updated by camera"
-                
-        return True, "Success"
-
-    def getEnabledAndScaledImageSetting(self, onvif_setting_name, onvif_setting_enabled_name, onvif_setting_enabled_val, onvif_setting_level_name):
-        # Make sure to query the system first
-        video_src_token_param = {"VideoSourceToken":self.video_source.token}
-        imaging_settings = self.imaging_service.GetImagingSettings(video_src_token_param)
-
-        if not hasattr(imaging_settings, onvif_setting_name):
-            return -1.0
-        
-        enabled = (imaging_settings[onvif_setting_name][onvif_setting_enabled_name] == onvif_setting_enabled_val)
-        unscaled = imaging_settings[onvif_setting_name][onvif_setting_level_name]
-        scaled = computeScaledFromUnscaled(unscaled, 
-                                           self.imaging_options[onvif_setting_name][onvif_setting_level_name].Min, 
-                                           self.imaging_options[onvif_setting_name][onvif_setting_level_name].Max)
-        return enabled, scaled
-    
-    def setEnabledAndScaledImageSetting(self, onvif_setting_name, onvif_setting_enabled_name, onvif_setting_enabled_val, 
-                                        onvif_setting_level_name, onvif_setting_level_scaled_val,
-                                        readback_check=True, force_integer=True):
-        # Bounds checking:
-        if (onvif_setting_level_scaled_val < 0.0 and onvif_setting_level_scaled_val != -1.0) or (onvif_setting_level_scaled_val > 1.0):
-            return False, "Invalid scaled value for " + onvif_setting_name + "." + onvif_setting_level_name
-        
-        # Make sure to query the system first
-        video_src_token_param = {"VideoSourceToken":self.video_source.token}
-        imaging_settings = self.imaging_service.GetImagingSettings(video_src_token_param)
-        
-        if not hasattr(imaging_settings, onvif_setting_name):
-            return False, "Unavailable setting: " + onvif_setting_name
-        
-        unscaled = computeUnscaledFromScaled(onvif_setting_level_scaled_val, 
-                                             self.imaging_options[onvif_setting_name][onvif_setting_level_name].Min, 
-                                             self.imaging_options[onvif_setting_name][onvif_setting_level_name].Max, force_integer)
-        new_imaging_settings = {"VideoSourceToken":self.video_source.token, "ImagingSettings":{onvif_setting_name: {onvif_setting_enabled_name: onvif_setting_enabled_val, onvif_setting_level_name: unscaled}}}
-        try:
-            self.imaging_service.SetImagingSettings(new_imaging_settings)
-        except Exception as e:
-            return False, "Onvif error: Failed to update " + onvif_setting_name + " - " + str(e)()
-
-        if readback_check is True:
-           unscaled_readback = self.imaging_service.GetImagingSettings(video_src_token_param)[onvif_setting_name]
-           if (unscaled_readback[onvif_setting_enabled_name] != onvif_setting_enabled_val) or (unscaled_readback[onvif_setting_level_name] != unscaled):
-               print("Debug: Readback failed: " + str(unscaled_readback) + "vs. " + str(new_imaging_settings["ImagingSettings"][onvif_setting_name]))
-               return False, onvif_setting_name + " not updated by camera"
-           
-        return True, "Success"
-
-    def getBacklightCompensation(self):
-        return self.getEnabledAndScaledImageSetting(self, "BacklightCompensation", "Mode", "ON", "Level")
-    
-    def setBacklightCompensation(self, enabled, scaled_val):
-        enabled_val = "ON" if enabled is True else "OFF"
-        return self.setEnabledAndScaledImageSetting("BacklightCompensation", "Mode", enabled_val, "Level", scaled_val)
-    
-    def getWideDynamicRange(self):
-        return self.getEnabledAndScaledImageSetting(self, "WideDynamicRange", "Mode", "ON", "Level")
-    
-    def setWideDynamicRange(self, enabled, scaled_val):
-        enabled_val = "ON" if enabled is True else "OFF"
-        return self.setEnabledAndScaledImageSetting("WideDynamicRange", "Mode", enabled_val, "Level", scaled_val)
-    
-    def getScaledBrightness(self):
-        return self.getScaledImageSetting("Brightness")
-    
-    def setScaledBrightness(self, scaled_val):
-        return self.setScaledImageSetting("Brightness", scaled_val)
-    
-    def getScaledColorSaturation(self):
-        return self.getScaledImageSetting("ColorSaturation")
-    
-    def setScaledColorSaturation(self, scaled_val):
-        return self.setScaledImageSetting("ColorSaturation", scaled_val)
-    
-    def getScaledContrast(self):
-        return self.getScaledImageSetting("Contrast")
-    
-    def setScaledContrast(self, scaled_val):
-        return self.setScaledImageSetting("Contrast", scaled_val)
-    
-    def getScaledSharpness(self):
-        return self.getScaledImageSetting("Sharpness")
-    
-    def setScaledSharpness(self, scaled_val):
-        return self.setScaledImageSetting("Sharpness", scaled_val)
-    
-    def getExposureSettings(self):
-        return self.getEnabledAndScaledImageSetting("Exposure", "Mode", "AUTO", "ExposureTime")
-     
-    def setExposureSettings(self, auto_exposure, manual_exposure_time_scaled, readback_check=True):
-        mode_val = "AUTO" if auto_exposure is True else "MANUAL"
-        return self.setEnabledAndScaledImageSetting("Exposure", "Mode", mode_val, 
-                                                    "ExposureTime", manual_exposure_time_scaled)
-    
-    def getWhiteBalanceSettings(self):
-        # Make sure to query the system first
-        video_src_token_param = {"VideoSourceToken":self.video_source.token}
-        imaging_settings = self.imaging_service.GetImagingSettings(video_src_token_param)
-        #print("Debugging: Image Settings = " + str(imaging_settings))
-
-        # Default return values
-        auto_wb = True
-        manual_cr_gain = None
-        manual_cb_gain = None
-                
-        if hasattr(imaging_settings, "WhiteBalance"):
-            auto_wb=(imaging_settings.WhiteBalance.Mode == "AUTO")
-            manual_cr_gain = computeScaledFromUnscaled(imaging_settings.WhiteBalance.CrGain, self.imaging_options.WhiteBalance.YrGain.Min, self.imaging_options.WhiteBalance.YrGain.Max)
-            manual_cb_gain = computeScaledFromUnscaled(imaging_settings.WhiteBalance.CbGain, self.imaging_options.WhiteBalance.YbGain.Min, self.imaging_options.WhiteBalance.YbGain.Max)
-
-        return auto_wb, manual_cr_gain, manual_cb_gain
-    
-    def setWhiteBalanceSettings(self, auto_wb, manual_cr_gain_scaled=None, manual_cb_gain_scaled=None, readback_check=True):
-        video_src_token_param = {"VideoSourceToken":self.video_source.token}
-        imaging_settings = self.imaging_service.GetImagingSettings(video_src_token_param)
-        
-        if not hasattr(imaging_settings, "WhiteBalance"):
-            return False, "Unavailable setting: WhiteBalance"
-        
-        updated_imaging_settings = self.imaging_service.create_type('SetImagingSettings')
-        updated_imaging_settings.ImagingSettings = imaging_settings
-        #print("Debugging: updated_imaging_settings before = " + str(updated_imaging_settings))
-        updated_imaging_settings.VideoSourceToken = self.video_source.token
-        updated_imaging_settings.ImagingSettings.WhiteBalance.Mode = "AUTO" if (auto_wb == True) else "MANUAL"
-        if manual_cr_gain_scaled is not None:
-            manual_cr_gain_unscaled = computeUnscaledFromScaled(manual_cr_gain_scaled, self.imaging_options.WhiteBalance.YrGain.Min, self.imaging_options.WhiteBalance.YrGain.Max)
-            updated_imaging_settings.ImagingSettings.WhiteBalance.CrGain = manual_cr_gain_unscaled
-        if manual_cb_gain_scaled is not None:
-            manual_cb_gain_unscaled = computeUnscaledFromScaled(manual_cb_gain_scaled, self.imaging_options.WhiteBalance.YbGain.Min, self.imaging_options.WhiteBalance.YbGain.Max)
-            updated_imaging_settings.ImagingSettings.WhiteBalance.CbGain = manual_cb_gain_unscaled
-
-        try:
-            self.imaging_service.SetImagingSettings(updated_imaging_settings)
-        except Exception as e:
-            return False, "Onvif error: Failed to update WhiteBalance - " + str(e)
-
-        if (readback_check is True):
-            auto_wb_rb, manual_cr_gain_rb, manual_cb_gain_rb = self.getWhiteBalanceSettings()
-            if (auto_wb_rb != auto_exposure or manual_cr_gain_rb != manual_cr_gain_scaled or manual_cb_gain_rb != manual_cb_gain_scaled):
-                print("Debugging: White balance = " + str(self.getWhiteBalanceSettings()))
-                return False, "White balance not updated by camera"
-        
-        return True, "Success"
+  
 
 if __name__ == '__main__':
     # Unit test with Sidus camera for now
@@ -649,32 +604,32 @@ if __name__ == '__main__':
         print(driver.setFramerate(max_fps=new_framerate))
 
     # Query, adjust, and check brightness
-    print("Current (Scaled) Brightness: ")
-    brightness = driver.getScaledBrightness()
+    print("Current () Brightness: ")
+    brightness = driver.getBrightness()
     print(brightness)
     if TEST_SET_BRIGHTNESS:
         brightness = (brightness+0.1) if (brightness < 0.9) else 0.1
         print("Updating brightness to " + str(brightness))
-        print(driver.setScaledBrightness(brightness))
+        print(driver.setBrightness(brightness))
 
     # Query, adjust, and check saturation
-    print("Current (Scaled) Saturation: ")
-    saturation = driver.getScaledColorSaturation()
+    print("Current () Saturation: ")
+    saturation = driver.getColorSaturation()
     print(saturation)
     if TEST_SET_SATURATION:
         saturation = (saturation-0.1) if (saturation > 0.1) else 0.9
         print("Updating saturation to " + str(saturation))
-        print(driver.setScaledColorSaturation(saturation))
+        print(driver.setColorSaturation(saturation))
     
     # Query adjust and check contrast
-    print("Current (Scaled) Contrast: ")
-    contrast = driver.getScaledContrast()
+    print("Current () Contrast: ")
+    contrast = driver.getContrast()
     print(contrast)
     if TEST_SET_CONTRAST:
         contrast = (contrast+0.8) if (contrast <= 0.2) else 0.0
         #contrast = (contrast-0.1) if (contrast > 0.1) else 0.9
         print("Updating contrast to " + str(contrast))
-        print(driver.setScaledContrast(contrast))
+        print(driver.setContrast(contrast))
 
     # Query, adjust, and check exposure
     print("Current Exposure:")
