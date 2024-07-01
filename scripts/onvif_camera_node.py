@@ -14,7 +14,7 @@ import rospy
 import threading
 import cv2
 
-from nepi_edge_sdk_base.idx_sensor_if import ROSIDXSensorIF
+from nepi_edge_sdk_idx.idx_sensor_if import ROSIDXSensorIF
 from nepi_edge_sdk_onvif.onvif_cam_driver import ONVIF_GENERIC_DRIVER_ID, OnvifIFCamDriver
 from nepi_edge_sdk_onvif.econ_routecam_driver import ECON_ROUTECAM_DRIVER_ID, EConRouteCamDriver
 

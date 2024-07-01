@@ -111,7 +111,7 @@ catkin_python_setup()
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
 	#INCLUDE_DIRS include
-	CATKIN_DEPENDS sensor_msgs nepi_ros_interfaces nepi_edge_sdk_base 
+	CATKIN_DEPENDS sensor_msgs nepi_ros_interfaces nepi_edge_sdk_base nepi_edge_sdk_idx
 )
 
 ###########
