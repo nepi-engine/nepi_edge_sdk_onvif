@@ -143,6 +143,7 @@ class ONVIFMgr:
       rospy.logerr(f'Unknown driver(s) specified ({device_cfg.idx_driver}, {device_cfg.ptx_driver})... will not update config')
       return OnvifDeviceCfgUpdateResponse(success = False)
         
+    rospy.loginfo(self.device_name_dict)
     device_name = self.device_name_dict[uuid]
 
     updated_cfg = {
@@ -186,6 +187,7 @@ class ONVIFMgr:
     if uuid in self.detected_onvifs:
       self.stopAndPurgeNodes(uuid)
       self.detected_onvifs.pop(uuid)
+      self.device_name_dict.pop(uuid)
 
     # Must handle our own saving since topics don't work in this class (see WARNING above)
     if self.autosave_cfg_changes is True:
@@ -206,6 +208,7 @@ class ONVIFMgr:
       if uuid in self.device_name_dict.keys():
         resp_status_for_device.device_name = self.device_name_dict[uuid]
       else:
+        self.device_name_dict[uuid] = uuid
         resp_status_for_device.device_name = uuid
 
       
@@ -270,6 +273,7 @@ class ONVIFMgr:
     #self.wsd.clearRemoteServices()
         
     detected_services = self.wsd.searchServices()
+    #rospy.loginfo(detected_services)
     #detected_services = self.wsd.searchServices(scopes=self.ONVIF_SCOPES)
     #rospy.logwarn('Debug: Discovered %d services', len(detected_services))
 
@@ -287,7 +291,7 @@ class ONVIFMgr:
         uuid = "-".join(uuid_tokens)
       uuid = uuid.upper()
       detected_uuids.append(uuid)
-      #rospy.logwarn('\tDebug: Detected %s', uuid)
+      rospy.logwarn('\tDebug: Detected %s', uuid)
             
       # Query this device and add to our tracked list if not previously done
       if uuid not in self.detected_onvifs:
@@ -346,59 +350,47 @@ class ONVIFMgr:
         self.detected_onvifs[uuid]['config'] = self.configured_onvifs[uuid] if uuid in self.configured_onvifs else None
         if self.detected_onvifs[uuid]['config'] is not None:
           # Check if this device can be reached
-          self.detected_onvifs[uuid]['connectable'] = self.attemptONVIFConnection(uuid)
-
+          connectable = self.attemptONVIFConnection(uuid)
+          self.detected_onvifs[uuid]['connectable'] = connectable
     lost_onvifs = []
-    for uuid in self.detected_onvifs:
-      detected = self.detected_onvifs[uuid]
-      #rospy.logerr('Debug: Checking onvif %s', detected)
-      
-      # Now look for services we've previously detected but are now lost
-      if uuid not in detected_uuids:
-
-        rospy.logwarn('No longer detecting UUID %s (%s)... purging from device list', uuid, detected['host'])
-        self.stopAndPurgeNodes(uuid)
+    for uuid in self.detected_onvifs.keys():
+      detected_onvif = self.detected_onvifs[uuid]
+      #rospy.logerr('Debug: Checking connection on onvif uuid %s', uuid)
+      connectable = self.attemptONVIFConnection(uuid)
+      if (connectable == False):
         lost_onvifs.append(uuid)
-        continue
+        #rospy.logerr('Debug: Added onvif uuid %s to lost list', uuid)
+      else:
+        needs_idx_start = (detected_onvif['video'] is True) and (detected_onvif['idx_subproc'] is None) and \
+                          (detected_onvif['config'] is not None) and ('idx_enabled' in detected_onvif['config']) and \
+                          (detected_onvif['config']['idx_enabled'] is True)
+        needs_ptx_start = (detected_onvif['ptz'] is True) and (detected_onvif['ptx_subproc'] is None) and \
+                          (detected_onvif['config'] is not None) and ('ptx_enabled' in detected_onvif['config']) and \
+                          (detected_onvif['config']['ptx_enabled'] is True)
+        needs_start = needs_idx_start or needs_ptx_start
+        # Now ensure that the device is connectable via the known/configured credentials
+        if needs_start:
+          # Device is connectable, so attempt to start the node(s), 
+          self.startNodesForDevice(uuid=uuid, start_idx = needs_idx_start, start_ptx = needs_ptx_start)
+        
+        needs_restart = False
+        if (detected_onvif['idx_subproc'] is not None) and (self.subprocessIsRunning(detected_onvif['idx_subproc']) is False):
+          rospy.logwarn('IDX node for {uuid} unexpectedly not running... will force restart')
+          needs_restart = True
+        if (detected_onvif['ptx_subproc'] is not None) and (self.subprocessIsRunning(detected_onvif['idx_subproc']) is False):
+          rospy.logwarn('PTX node for {uuid} unexpectedly not running... will force restart')
+          needs_restart = True
 
-      if detected['config'] is None:
-        #rospy.loginfo(60, 'No manager configuration for device at %s:%d... not managing this device currently', detected['host'], detected['port'])
-        continue
-
-      # If not yet connectable, try again here, but don't proceed if still not connectable
-      if detected['connectable'] is False:
-        self.detected_onvifs[uuid]['connectable'] = self.attemptONVIFConnection(uuid)
-      if not self.detected_onvifs[uuid]['connectable']:
-        # Warning logged upstream
-        continue
-
-      needs_idx_start = (detected['video'] is True) and (detected['idx_subproc'] is None) and \
-                        (detected['config'] is not None) and ('idx_enabled' in detected['config']) and \
-                        (detected['config']['idx_enabled'] is True)
-      needs_ptx_start = (detected['ptz'] is True) and (detected['ptx_subproc'] is None) and \
-                        (detected['config'] is not None) and ('ptx_enabled' in detected['config']) and \
-                        (detected['config']['ptx_enabled'] is True)
-      needs_start = needs_idx_start or needs_ptx_start
-      # Now ensure that the device is connectable via the known/configured credentials
-      if needs_start:
-        # Device is connectable, so attempt to start the node(s), 
-        self.startNodesForDevice(uuid=uuid, start_idx = needs_idx_start, start_ptx = needs_ptx_start)
-      
-      needs_restart = False
-      if (detected['idx_subproc'] is not None) and (self.subprocessIsRunning(detected['idx_subproc']) is False):
-        rospy.logwarn('IDX node for {uuid} unexpectedly not running... will force restart')
-        needs_restart = True
-      if (detected['ptx_subproc'] is not None) and (self.subprocessIsRunning(detected['idx_subproc']) is False):
-        rospy.logwarn('PTX node for {uuid} unexpectedly not running... will force restart')
-        needs_restart = True
-
-      if needs_restart is True:
-        self.stopAndPurgeNodes(uuid)
+        if needs_restart is True:
+          self.stopAndPurgeNodes(uuid)
         
     # Finally, purge lost device from our set... can't do it in the detection loop above because it would modify the object 
     # that is being iterated over; throws exception.
     for uuid in lost_onvifs:
-      self.detected_onvifs.pop(uuid)
+        #rospy.logwarn('No longer detecting ' + uuid + ' purging from detected list')
+        self.stopAndPurgeNodes(uuid)
+        self.detected_onvifs.pop(uuid)
+
 
     # And now that we are finished, start a timer for the next runDiscovery()
     rospy.Timer(rospy.Duration(self.discovery_interval_s), self.runDiscovery, oneshot=True)
@@ -410,7 +402,7 @@ class ONVIFMgr:
     
     config = self.detected_onvifs[uuid]['config']
     if (config is None) or ('username' not in config) or ('password' not in config):
-      rospy.logerr('Incomplete ONVIF configuration for %s... cannot proceed')
+      #rospy.logerr('Incomplete ONVIF configuration for %s... cannot proceed')
       return False
     
     hostname = self.detected_onvifs[uuid]['host']
@@ -427,9 +419,9 @@ class ONVIFMgr:
       dev_info = soapGetDeviceInformation(hostname, str(port), username, password)
       #rospy.logwarn(f'Debug: dev_info = {dev_info}')
       soapSyncSystemDateAndTime(hostname, str(port), username, password)
-      rospy.loginfo('Connected to device %s at %s:%d via configured credentials', uuid, hostname, port)
+      #rospy.loginfo('Connected to device %s at %s:%d via configured credentials', uuid, hostname, port)
     except Exception as e:
-      rospy.logwarn('Unable to connect to detected ONVIF device %s at %s:%d via configured credentials (%s)', uuid, hostname, port, e)
+      #rospy.logwarn('Unable to connect to detected ONVIF device %s at %s:%d via configured credentials (%s)', uuid, hostname, port, e)
       return False
     
     self.detected_onvifs[uuid]['manufacturer'] = dev_info["Manufacturer"]
@@ -466,6 +458,7 @@ class ONVIFMgr:
     self.device_name_dict[uuid] = device_name
     if start_idx is True:
       ros_node_name = config['node_base_name'] + '_camera_' + identifier
+      
       fully_qualified_node_name = base_namespace + ros_node_name
       self.checkLoadConfigFile(node_namespace=fully_qualified_node_name)
       self.overrideConnectionParams(fully_qualified_node_name, username, password, hostname, port, config['idx_driver'])
@@ -538,7 +531,9 @@ class ONVIFMgr:
   
   def checkLoadConfigFile(self, node_namespace):
     ros_node_name = node_namespace.split('/')[-1]
-    node_config_file_folder = os.path.join(self.DEFAULT_NEPI_CONFIG_PATH, ros_node_name)
+    folder_name = "drivers/" + ros_node_name
+    node_config_file_folder = os.path.join(self.DEFAULT_NEPI_CONFIG_PATH, folder_name)
+    rospy.loginfo(node_config_file_folder)
     # Just make the folder if necessary 
     os.makedirs(node_config_file_folder, exist_ok=True)
 

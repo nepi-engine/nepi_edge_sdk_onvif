@@ -59,165 +59,168 @@ class OnvifPanTiltNode:
 
         # Start the driver to connect to the camera
         rospy.loginfo(self.node_name + ": Launching " + self.driver_id + " driver")
-        while not rospy.is_shutdown():
+        driver_constructed = False
+        attempts = 0
+        while not rospy.is_shutdown() and driver_constructed == False and attempts < 5:
+            rospy.loginfo("Will try to construct ONVIF Cam Driver")
             try:
-                #self.driver = DriverConstructor(username, password, host, onvif_port)
-                #rospy.logerr("DEBUG: Launching with hard-coded credentials")
                 self.driver = DriverConstructor(username, password, host, onvif_port)
-                break
+                driver_constructed = True
+                rospy.loginfo("driver constructed")
             except Exception as e:
-                # Only log the error every 30 seconds -- don't want to fill up log in the case that the camera simply isn't attached.
-                rospy.logerr_throttle(30, self.node_name + ": Failed to instantiate OnvifIFPanTiltDriver... device not online? bad credentials?: " + str(e))
                 rospy.sleep(1)
-
-        rospy.loginfo(self.node_name + ": ... Connected!")
-        self.dev_info = self.driver.getDeviceInfo()
-        self.logDeviceInfo()
-
-        # Now initialize the default settings, some of which require driver support -- can be overridden by config file
-        default_settings = {
-            'frame_id' : self.node_name + '_frame',
-            'yaw_joint_name' : self.node_name + '_yaw_joint',
-            'pitch_joint_name' : self.node_name + '_pitch_joint',
-            'reverse_yaw_control' : False,
-            'reverse_pitch_control' : False,
-            'speed_ratio' : 1.0,
-            'status_update_rate_hz' : self.DEFAULT_STATUS_UPDATE_RATE_HZ
-        }
-
-        # Driver can specify position limits via getPositionLimitsInDegrees. Otherwise, we hard-code them 
-        # to arbitrary values here, but can be overridden in device config file (see ptx_if.py)
-        if hasattr(self.driver, 'getPositionLimitsInDegrees'):
-            driver_specified_limits = self.driver.getPositionLimitsInDegrees()
-            default_settings['max_yaw_hardstop_deg'] = driver_specified_limits['max_yaw_hardstop_deg']
-            default_settings['min_yaw_hardstop_deg'] = driver_specified_limits['min_yaw_hardstop_deg']
-            default_settings['max_pitch_hardstop_deg'] = driver_specified_limits['max_pitch_hardstop_deg']
-            default_settings['min_pitch_hardstop_deg'] = driver_specified_limits['min_pitch_hardstop_deg']
-            default_settings['max_yaw_softstop_deg'] = driver_specified_limits['max_yaw_softstop_deg']
-            default_settings['min_yaw_softstop_deg'] = driver_specified_limits['min_yaw_softstop_deg']
-            default_settings['max_pitch_softstop_deg'] = driver_specified_limits['max_pitch_softstop_deg']
-            default_settings['min_pitch_softstop_deg'] = driver_specified_limits['min_pitch_softstop_deg']
+            attempts += 1
+        if driver_constructed == False:
+            rospy.signal_shutdown("Shutting down Genicam node " + self.node_name + ", unable to connect to driver")
         else:
-            default_settings['max_yaw_hardstop_deg'] = 60.0
-            default_settings['min_yaw_hardstop_deg'] = -60.0
-            default_settings['max_pitch_hardstop_deg'] = 60.0
-            default_settings['min_pitch_hardstop_deg'] = -60.0
-            default_settings['max_yaw_softstop_deg'] = 59.0
-            default_settings['min_yaw_softstop_deg'] = -59.0
-            default_settings['max_pitch_softstop_deg'] = 59.0
-            default_settings['min_pitch_softstop_deg'] = -59.0
-                
-        ptx_callback_names = {
-            # PTX Standard
-            "StopMoving": self.stopMoving,
-            "MoveYaw": self.moveYaw,
-            "MovePitch": self.movePitch,
-            "SetSpeed": self.setSpeed,
-            "GetSpeed": self.getSpeed,
-            "GetCurrentPosition": self.getCurrentPosition,
-            "GotoPosition": self.gotoPosition,
-            "GoHome": self.goHome,
-            "SetHomePosition": self.setHomePosition,
-            "SetHomePositionHere": self.setHomePositionHere,
-            "GotoWaypoint": self.gotoWaypoint,
-            "SetWaypoint": self.setWaypoint,
-            "SetWaypointHere": self.setWaypointHere
-        }
+            rospy.loginfo(self.node_name + ": ... Connected!")
+            self.dev_info = self.driver.getDeviceInfo()
+            self.logDeviceInfo()
 
-        # Must pass a capabilities structure to ptx_interface constructor
-        ptx_default_capabilities = {}
+            # Now initialize the default settings, some of which require driver support -- can be overridden by config file
+            default_settings = {
+                'frame_id' : self.node_name + '_frame',
+                'yaw_joint_name' : self.node_name + '_yaw_joint',
+                'pitch_joint_name' : self.node_name + '_pitch_joint',
+                'reverse_yaw_control' : False,
+                'reverse_pitch_control' : False,
+                'speed_ratio' : 1.0,
+                'status_update_rate_hz' : self.DEFAULT_STATUS_UPDATE_RATE_HZ
+            }
 
-        # Now check with the driver if any of these PTX capabilities are explicitly not present
-        if not self.driver.hasAdjustableSpeed():
-            ptx_callback_names["GetSpeed"] = None # Clear the method
-            ptx_callback_names["SetSpeed"] = None # Clear the method
-            ptx_default_capabilities['has_speed_control'] = False
-        else:
-            ptx_default_capabilities['has_speed_control'] = True
-            
-        if not self.driver.reportsPosition():
-            ptx_callback_names["GetCurrentPosition"] = None # Clear the method
-            
-        if not self.driver.hasAbsolutePositioning():
-            rospy.logerr("Debug: Clearing GotoPosition")
-            ptx_callback_names["GotoPosition"] = None # Clear the method
-        
-        self.has_absolute_positioning_and_feedback = self.driver.hasAbsolutePositioning() and self.driver.reportsPosition()
-        ptx_default_capabilities['has_absolute_positioning'] = self.has_absolute_positioning_and_feedback
-                
-        if not self.driver.canHome() and not self.has_absolute_positioning_and_feedback:
-            ptx_callback_names["GoHome"] = None
-            ptx_default_capabilities['has_homing'] = False
-        else:
-            ptx_default_capabilities['has_homing'] = True
-        
-            
-        if not self.driver.homePositionAdjustable() and not self.has_absolute_positioning_and_feedback:
-            ptx_callback_names["SetHomePositionHere"] = None
-        
-        if not self.driver.hasWaypoints() and not self.has_absolute_positioning_and_feedback:
-            ptx_callback_names["GotoWaypoint"] = None
-            ptx_callback_names["SetWaypointHere"] = None
-            ptx_default_capabilities['has_waypoints'] = False
-        else:
-            ptx_default_capabilities['has_waypoints'] = True
-        
-        # Following are implemented entirely in software because ONVIF has no support for setting HOME or PRESET by position
-        if not self.has_absolute_positioning_and_feedback:
-            ptx_callback_names["SetHomePosition"] = None    
-            ptx_callback_names["SetWaypoint"] = None
-
-        # Now that we've updated the callbacks table, can apply the remappings... this is particularly useful since
-        # many ONVIF devices report capabilities that they don't actually have, so need a user-override mechanism. In
-        # that case, assign these to null in the config file
-        # TODO: Not sure we actually need remappings for PTX: Makes sense for IDX because there are lots of controllable params.
-        ptx_remappings = rospy.get_param('~ptx_remappings', {})
-        rospy.loginfo(self.node_name + ': Establishing PTX remappings')
-        for from_name in ptx_remappings:
-            to_name = ptx_remappings[from_name]
-            if from_name not in ptx_callback_names or (to_name not in ptx_callback_names and to_name != None and to_name != 'None'):
-                rospy.logwarn('\tInvalid PTX remapping: ' + from_name + '-->' + to_name)
-            elif to_name is None or to_name == 'None':
-                ptx_callback_names[from_name] = None
-                rospy.loginfo('\Remapping %s to non-existence to remove capability', from_name)
-            elif ptx_callback_names[to_name] is None:
-                rospy.logwarn('\tRemapping ' + from_name + ' to an unavailable adjustment (' + to_name + ')')
+            # Driver can specify position limits via getPositionLimitsInDegrees. Otherwise, we hard-code them 
+            # to arbitrary values here, but can be overridden in device config file (see ptx_if.py)
+            if hasattr(self.driver, 'getPositionLimitsInDegrees'):
+                driver_specified_limits = self.driver.getPositionLimitsInDegrees()
+                default_settings['max_yaw_hardstop_deg'] = driver_specified_limits['max_yaw_hardstop_deg']
+                default_settings['min_yaw_hardstop_deg'] = driver_specified_limits['min_yaw_hardstop_deg']
+                default_settings['max_pitch_hardstop_deg'] = driver_specified_limits['max_pitch_hardstop_deg']
+                default_settings['min_pitch_hardstop_deg'] = driver_specified_limits['min_pitch_hardstop_deg']
+                default_settings['max_yaw_softstop_deg'] = driver_specified_limits['max_yaw_softstop_deg']
+                default_settings['min_yaw_softstop_deg'] = driver_specified_limits['min_yaw_softstop_deg']
+                default_settings['max_pitch_softstop_deg'] = driver_specified_limits['max_pitch_softstop_deg']
+                default_settings['min_pitch_softstop_deg'] = driver_specified_limits['min_pitch_softstop_deg']
             else:
-                ptx_callback_names[from_name] = ptx_callback_names[to_name]
-                rospy.loginfo('\t' + from_name + '-->' + to_name)
+                default_settings['max_yaw_hardstop_deg'] = 60.0
+                default_settings['min_yaw_hardstop_deg'] = -60.0
+                default_settings['max_pitch_hardstop_deg'] = 60.0
+                default_settings['min_pitch_hardstop_deg'] = -60.0
+                default_settings['max_yaw_softstop_deg'] = 59.0
+                default_settings['min_yaw_softstop_deg'] = -59.0
+                default_settings['max_pitch_softstop_deg'] = 59.0
+                default_settings['min_pitch_softstop_deg'] = -59.0
+                    
+            ptx_callback_names = {
+                # PTX Standard
+                "StopMoving": self.stopMoving,
+                "MoveYaw": self.moveYaw,
+                "MovePitch": self.movePitch,
+                "SetSpeed": self.setSpeed,
+                "GetSpeed": self.getSpeed,
+                "GetCurrentPosition": self.getCurrentPosition,
+                "GotoPosition": self.gotoPosition,
+                "GoHome": self.goHome,
+                "SetHomePosition": self.setHomePosition,
+                "SetHomePositionHere": self.setHomePositionHere,
+                "GotoWaypoint": self.gotoWaypoint,
+                "SetWaypoint": self.setWaypoint,
+                "SetWaypointHere": self.setWaypointHere
+            }
 
-        # Launch the PTX interface --  this takes care of initializing all the ptx settings from config. file, subscribing and advertising topics and services, etc.
-        rospy.loginfo(self.node_name + ": Launching NEPI PTX (ROS) interface...")
-        self.ptx_if = ROSPTXActuatorIF(ptx_device_name=self.node_name,
-                                       serial_num = self.driver.getDeviceSerialNumber(),
-                                       hw_version = self.driver.getDeviceHardwareId(),
-                                       sw_version = self.driver.getDeviceFirmwareVersion(),
-                                       default_settings = default_settings,
-                                       default_capabilities = ptx_default_capabilities,
-                                       stopMovingCb = ptx_callback_names["StopMoving"],
-                                       moveYawCb = ptx_callback_names["MoveYaw"],
-                                       movePitchCb = ptx_callback_names["MovePitch"],
-                                       setSpeedCb = ptx_callback_names["SetSpeed"],
-                                       getSpeedCb = ptx_callback_names["GetSpeed"],
-                                       getCurrentPositionCb = ptx_callback_names["GetCurrentPosition"],
-                                       gotoPositionCb = ptx_callback_names["GotoPosition"],
-                                       goHomeCb = ptx_callback_names["GoHome"],
-                                       setHomePositionCb = ptx_callback_names["SetHomePosition"],
-                                       setHomePositionHereCb = ptx_callback_names["SetHomePositionHere"],
-                                       gotoWaypointCb = ptx_callback_names["GotoWaypoint"],
-                                       setWaypointCb = ptx_callback_names["SetWaypoint"],
-                                       setWaypointHereCb = ptx_callback_names["SetWaypointHere"])
-        rospy.loginfo(self.node_name + ": ... PTX interface running")
+            # Must pass a capabilities structure to ptx_interface constructor
+            ptx_default_capabilities = {}
 
-        self.speed_ratio = 1.0
-        self.home_yaw_deg = 0.0
-        self.home_pitch_deg = 0.0
-        self.waypoints = {} # Dictionary of dictionaries with numerical key and {waypoint_pitch, waypoint_yaw} dict value
+            # Now check with the driver if any of these PTX capabilities are explicitly not present
+            if not self.driver.hasAdjustableSpeed():
+                ptx_callback_names["GetSpeed"] = None # Clear the method
+                ptx_callback_names["SetSpeed"] = None # Clear the method
+                ptx_default_capabilities['has_speed_control'] = False
+            else:
+                ptx_default_capabilities['has_speed_control'] = True
+                
+            if not self.driver.reportsPosition():
+                ptx_callback_names["GetCurrentPosition"] = None # Clear the method
+                
+            if not self.driver.hasAbsolutePositioning():
+                rospy.logerr("Debug: Clearing GotoPosition")
+                ptx_callback_names["GotoPosition"] = None # Clear the method
+            
+            self.has_absolute_positioning_and_feedback = self.driver.hasAbsolutePositioning() and self.driver.reportsPosition()
+            ptx_default_capabilities['has_absolute_positioning'] = self.has_absolute_positioning_and_feedback
+                    
+            if not self.driver.canHome() and not self.has_absolute_positioning_and_feedback:
+                ptx_callback_names["GoHome"] = None
+                ptx_default_capabilities['has_homing'] = False
+            else:
+                ptx_default_capabilities['has_homing'] = True
+            
+                
+            if not self.driver.homePositionAdjustable() and not self.has_absolute_positioning_and_feedback:
+                ptx_callback_names["SetHomePositionHere"] = None
+            
+            if not self.driver.hasWaypoints() and not self.has_absolute_positioning_and_feedback:
+                ptx_callback_names["GotoWaypoint"] = None
+                ptx_callback_names["SetWaypointHere"] = None
+                ptx_default_capabilities['has_waypoints'] = False
+            else:
+                ptx_default_capabilities['has_waypoints'] = True
+            
+            # Following are implemented entirely in software because ONVIF has no support for setting HOME or PRESET by position
+            if not self.has_absolute_positioning_and_feedback:
+                ptx_callback_names["SetHomePosition"] = None    
+                ptx_callback_names["SetWaypoint"] = None
 
-        # Set up save_cfg interface
-        self.save_cfg_if = SaveCfgIF(updateParamsCallback=self.setCurrentSettingsAsDefault, paramsModifiedCallback=self.updateFromParamServer)
+            # Now that we've updated the callbacks table, can apply the remappings... this is particularly useful since
+            # many ONVIF devices report capabilities that they don't actually have, so need a user-override mechanism. In
+            # that case, assign these to null in the config file
+            # TODO: Not sure we actually need remappings for PTX: Makes sense for IDX because there are lots of controllable params.
+            ptx_remappings = rospy.get_param('~ptx_remappings', {})
+            rospy.loginfo(self.node_name + ': Establishing PTX remappings')
+            for from_name in ptx_remappings:
+                to_name = ptx_remappings[from_name]
+                if from_name not in ptx_callback_names or (to_name not in ptx_callback_names and to_name != None and to_name != 'None'):
+                    rospy.logwarn('\tInvalid PTX remapping: ' + from_name + '-->' + to_name)
+                elif to_name is None or to_name == 'None':
+                    ptx_callback_names[from_name] = None
+                    rospy.loginfo('\Remapping %s to non-existence to remove capability', from_name)
+                elif ptx_callback_names[to_name] is None:
+                    rospy.logwarn('\tRemapping ' + from_name + ' to an unavailable adjustment (' + to_name + ')')
+                else:
+                    ptx_callback_names[from_name] = ptx_callback_names[to_name]
+                    rospy.loginfo('\t' + from_name + '-->' + to_name)
 
-        rospy.spin()
+            # Launch the PTX interface --  this takes care of initializing all the ptx settings from config. file, subscribing and advertising topics and services, etc.
+            rospy.loginfo(self.node_name + ": Launching NEPI PTX (ROS) interface...")
+            self.ptx_if = ROSPTXActuatorIF(ptx_device_name=self.node_name,
+                                        serial_num = self.driver.getDeviceSerialNumber(),
+                                        hw_version = self.driver.getDeviceHardwareId(),
+                                        sw_version = self.driver.getDeviceFirmwareVersion(),
+                                        default_settings = default_settings,
+                                        default_capabilities = ptx_default_capabilities,
+                                        stopMovingCb = ptx_callback_names["StopMoving"],
+                                        moveYawCb = ptx_callback_names["MoveYaw"],
+                                        movePitchCb = ptx_callback_names["MovePitch"],
+                                        setSpeedCb = ptx_callback_names["SetSpeed"],
+                                        getSpeedCb = ptx_callback_names["GetSpeed"],
+                                        getCurrentPositionCb = ptx_callback_names["GetCurrentPosition"],
+                                        gotoPositionCb = ptx_callback_names["GotoPosition"],
+                                        goHomeCb = ptx_callback_names["GoHome"],
+                                        setHomePositionCb = ptx_callback_names["SetHomePosition"],
+                                        setHomePositionHereCb = ptx_callback_names["SetHomePositionHere"],
+                                        gotoWaypointCb = ptx_callback_names["GotoWaypoint"],
+                                        setWaypointCb = ptx_callback_names["SetWaypoint"],
+                                        setWaypointHereCb = ptx_callback_names["SetWaypointHere"])
+            rospy.loginfo(self.node_name + ": ... PTX interface running")
+
+            self.speed_ratio = 1.0
+            self.home_yaw_deg = 0.0
+            self.home_pitch_deg = 0.0
+            self.waypoints = {} # Dictionary of dictionaries with numerical key and {waypoint_pitch, waypoint_yaw} dict value
+
+            # Set up save_cfg interface
+            self.save_cfg_if = SaveCfgIF(updateParamsCallback=self.setCurrentSettingsAsDefault, paramsModifiedCallback=self.updateFromParamServer)
+
+            rospy.spin()
     
     def logDeviceInfo(self):
         dev_info_string = self.node_name + " Device Info:\n"

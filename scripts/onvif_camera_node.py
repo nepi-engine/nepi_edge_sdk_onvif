@@ -92,133 +92,136 @@ class OnvifCameraNode:
         # Start the driver to connect to the camera
         rospy.loginfo(self.node_name + ": Launching " + self.driver_id + " driver")
         driver_constructed = False
-        while not rospy.is_shutdown() and driver_constructed == False:
+        attempts = 0
+        while not rospy.is_shutdown() and driver_constructed == False and attempts < 5:
             rospy.loginfo("Will try to construct ONVIF Cam Driver")
             try:
                 self.driver = DriverConstructor(username, password, host, onvif_port)
                 driver_constructed = True
                 rospy.loginfo("driver constructed")
             except Exception as e:
-                # Only log the error every 30 seconds -- don't want to fill up log in the case that the camera simply isn't attached.
-                rospy.logerr_throttle(30, self.node_name + ": Failed to instantiate OnvifIFCamDriver... camera not online? bad credentials?: " + str(e))
                 rospy.sleep(1)
-        rospy.loginfo(self.node_name + ": ... Connected!")
-        self.dev_info = self.driver.getDeviceInfo()
-        self.logDeviceInfo()        
-        # Configurable IDX parameter and data output remapping to support specific camera needs/capabilities
-        # Don't edit this table directly -- do it through idx_remapping parameters
-        idx_callback_names = {
-            "Controls" : {
-                # IDX Standard
-                "Controls_Enable":  self.setControlsEnable,
-                "Auto_Adjust":  self.setAutoAdjust,
-                "Brightness": self.setBrightness,
-                "Contrast":  self.setContrast,
-                "Thresholding": self.setThresholding,
-                "Resolution": self.setResolutionMode,
-                "Framerate":  self.setFramerateMode,
-                "Range":  None
-            },
-            
-
-            "Data" : {
-                # Data callbacks
-                "Color2DImg": self.getColorImg,
-                "StopColor2DImg": self.stopColorImg,
-                "BW2DImg": self.getBWImg,
-                "StopBW2DImg": self.stopBWImg,
-                "DepthMap": None, 
-                "StopDepthMap": None,
-                "DepthImg": None, 
-                "StopDepthImg": None,
-                "Pointcloud": None, 
-                "StopPointcloud": None,
-                "PointcloudImg": None, 
-                "StopPointcloudImg": None,
-                "GPS": None,
-                "Odom": None,
-                "Heading": None,
-            }
-        }
-
-        # Establish the URI indices (from ONVIF "Profiles") for the two image streams.
-        # If these aren't the same, encoder param adjustments (resolution and framerate)
-        # will only affect the first one.... so
-        # TODO: Consider a scheme for adjusting parameters for separate streams independently
-        # or in lock-step. Not sure if the uri_index and encoder_index have the same meaning
-        self.img_uri_index = rospy.get_param('~/img_uri_index', 0)
-        rospy.set_param('~/img_uri_index', self.img_uri_index)
-        #self.bw_2d_img_uri_index = rospy.get_param('~/image_uris/bw_2d_img_uri_index', 0)
-        #rospy.set_param('~/image_uris/bw_2d_img_uri_index', self.bw_2d_img_uri_index)
-
-        # Create threading locks for each URI index (currently just 1) to provide threadsafety
-        self.img_uri_lock = threading.Lock()
-        self.color_image_acquisition_running = False
-        self.bw_image_acquisition_running = False
-        self.cached_2d_color_frame = None
-        self.cached_2d_color_frame_timestamp = None
-
-
-        # Initialize controls
-        self.factory_controls = self.FACTORY_CONTROLS
-        self.current_controls = self.factory_controls # Updateded during initialization
-        self.current_fps = self.DEFAULT_CURRENT_FPS # Should be updateded when settings read
-
-        # Initialize settings
-        self.cap_settings = self.getCapSettings()
-        rospy.loginfo("CAPS SETTINGS")
-        #for setting in self.cap_settings:
-            #rospy.loginfo(setting)
-        self.factory_settings = self.getFactorySettings()
-        rospy.loginfo("FACTORY SETTINGS")
-        #for setting in self.factory_settings:
-            #rospy.loginfo(setting)
-
-        # Launch the IDX interface --  this takes care of initializing all the camera settings from config. file
-        rospy.loginfo(self.node_name + ": Launching NEPI IDX (ROS) interface...")
-        self.device_info_dict["node_name"] = self.node_name
-        if self.node_name.find("_") != -1:
-            split_name = self.node_name.rsplit('_', 1)
-            self.device_info_dict["sensor_name"] = split_name[0]
-            self.device_info_dict["identifier"] = split_name[1]
+            attempts += 1
+        if driver_constructed == False:
+            rospy.signal_shutdown("Shutting down Genicam node " + self.node_name + ", unable to connect to driver")
         else:
-            self.device_info_dict["sensor_name"] = self.node_name
-        self.idx_if = ROSIDXSensorIF(device_info = self.device_info_dict,
-                                     capSettings = self.cap_settings,
-                                     factorySettings = self.factory_settings,
-                                     settingUpdateFunction=self.settingUpdateFunction,
-                                     getSettingsFunction=self.getSettings,
-                                     factoryControls = self.FACTORY_CONTROLS,
-                                     setControlsEnable = idx_callback_names["Controls"]["Controls_Enable"],
-                                     setAutoAdjust= idx_callback_names["Controls"]["Auto_Adjust"],
-                                     setResolutionMode=idx_callback_names["Controls"]["Resolution"], 
-                                     setFramerateMode=idx_callback_names["Controls"]["Framerate"], 
-                                     setContrast=idx_callback_names["Controls"]["Contrast"], 
-                                     setBrightness=idx_callback_names["Controls"]["Brightness"], 
-                                     setThresholding=idx_callback_names["Controls"]["Thresholding"], 
-                                     setRange=idx_callback_names["Controls"]["Range"], 
-                                     getColor2DImg=idx_callback_names["Data"]["Color2DImg"], 
-                                     stopColor2DImgAcquisition=idx_callback_names["Data"]["StopColor2DImg"],
-                                     getBW2DImg=idx_callback_names["Data"]["BW2DImg"], 
-                                     stopBW2DImgAcquisition=idx_callback_names["Data"]["StopBW2DImg"],
-                                     getDepthMap=idx_callback_names["Data"]["DepthMap"], 
-                                     stopDepthMapAcquisition=idx_callback_names["Data"]["StopDepthMap"],
-                                     getDepthImg=idx_callback_names["Data"]["DepthImg"], 
-                                     stopDepthImgAcquisition=idx_callback_names["Data"]["StopDepthImg"],
-                                     getPointcloud=idx_callback_names["Data"]["Pointcloud"], 
-                                     stopPointcloudAcquisition=idx_callback_names["Data"]["StopPointcloud"],
-                                     getPointcloudImg=idx_callback_names["Data"]["PointcloudImg"], 
-                                     stopPointcloudImgAcquisition=idx_callback_names["Data"]["StopPointcloudImg"],
-                                     getGPSMsg=idx_callback_names["Data"]["GPS"],
-                                     getOdomMsg=idx_callback_names["Data"]["Odom"],
-                                     getHeadingMsg=idx_callback_names["Data"]["Heading"])
-        rospy.loginfo(self.node_name + ": ... IDX interface running")
-        
-        # Now that all camera start-up stuff is processed, we can update the camera from the parameters that have been established
-        self.idx_if.updateFromParamServer()
+            rospy.loginfo(self.node_name + ": ... Connected!")
+            self.dev_info = self.driver.getDeviceInfo()
+            self.logDeviceInfo()        
+            # Configurable IDX parameter and data output remapping to support specific camera needs/capabilities
+            # Don't edit this table directly -- do it through idx_remapping parameters
+            idx_callback_names = {
+                "Controls" : {
+                    # IDX Standard
+                    "Controls_Enable":  self.setControlsEnable,
+                    "Auto_Adjust":  self.setAutoAdjust,
+                    "Brightness": self.setBrightness,
+                    "Contrast":  self.setContrast,
+                    "Thresholding": self.setThresholding,
+                    "Resolution": self.setResolutionMode,
+                    "Framerate":  self.setFramerateMode,
+                    "Range":  None
+                },
+                
 
-        # Now start the node
-        rospy.spin()
+                "Data" : {
+                    # Data callbacks
+                    "Color2DImg": self.getColorImg,
+                    "StopColor2DImg": self.stopColorImg,
+                    "BW2DImg": self.getBWImg,
+                    "StopBW2DImg": self.stopBWImg,
+                    "DepthMap": None, 
+                    "StopDepthMap": None,
+                    "DepthImg": None, 
+                    "StopDepthImg": None,
+                    "Pointcloud": None, 
+                    "StopPointcloud": None,
+                    "PointcloudImg": None, 
+                    "StopPointcloudImg": None,
+                    "GPS": None,
+                    "Odom": None,
+                    "Heading": None,
+                }
+            }
+
+            # Establish the URI indices (from ONVIF "Profiles") for the two image streams.
+            # If these aren't the same, encoder param adjustments (resolution and framerate)
+            # will only affect the first one.... so
+            # TODO: Consider a scheme for adjusting parameters for separate streams independently
+            # or in lock-step. Not sure if the uri_index and encoder_index have the same meaning
+            self.img_uri_index = rospy.get_param('~/img_uri_index', 0)
+            rospy.set_param('~/img_uri_index', self.img_uri_index)
+            #self.bw_2d_img_uri_index = rospy.get_param('~/image_uris/bw_2d_img_uri_index', 0)
+            #rospy.set_param('~/image_uris/bw_2d_img_uri_index', self.bw_2d_img_uri_index)
+
+            # Create threading locks for each URI index (currently just 1) to provide threadsafety
+            self.img_uri_lock = threading.Lock()
+            self.color_image_acquisition_running = False
+            self.bw_image_acquisition_running = False
+            self.cached_2d_color_frame = None
+            self.cached_2d_color_frame_timestamp = None
+
+
+            # Initialize controls
+            self.factory_controls = self.FACTORY_CONTROLS
+            self.current_controls = self.factory_controls # Updateded during initialization
+            self.current_fps = self.DEFAULT_CURRENT_FPS # Should be updateded when settings read
+
+            # Initialize settings
+            self.cap_settings = self.getCapSettings()
+            rospy.loginfo("CAPS SETTINGS")
+            #for setting in self.cap_settings:
+                #rospy.loginfo(setting)
+            self.factory_settings = self.getFactorySettings()
+            rospy.loginfo("FACTORY SETTINGS")
+            #for setting in self.factory_settings:
+                #rospy.loginfo(setting)
+
+            # Launch the IDX interface --  this takes care of initializing all the camera settings from config. file
+            rospy.loginfo(self.node_name + ": Launching NEPI IDX (ROS) interface...")
+            self.device_info_dict["node_name"] = self.node_name
+            if self.node_name.find("_") != -1:
+                split_name = self.node_name.rsplit('_', 1)
+                self.device_info_dict["sensor_name"] = split_name[0]
+                self.device_info_dict["identifier"] = split_name[1]
+            else:
+                self.device_info_dict["sensor_name"] = self.node_name
+            self.idx_if = ROSIDXSensorIF(device_info = self.device_info_dict,
+                                        capSettings = self.cap_settings,
+                                        factorySettings = self.factory_settings,
+                                        settingUpdateFunction=self.settingUpdateFunction,
+                                        getSettingsFunction=self.getSettings,
+                                        factoryControls = self.FACTORY_CONTROLS,
+                                        setControlsEnable = idx_callback_names["Controls"]["Controls_Enable"],
+                                        setAutoAdjust= idx_callback_names["Controls"]["Auto_Adjust"],
+                                        setResolutionMode=idx_callback_names["Controls"]["Resolution"], 
+                                        setFramerateMode=idx_callback_names["Controls"]["Framerate"], 
+                                        setContrast=idx_callback_names["Controls"]["Contrast"], 
+                                        setBrightness=idx_callback_names["Controls"]["Brightness"], 
+                                        setThresholding=idx_callback_names["Controls"]["Thresholding"], 
+                                        setRange=idx_callback_names["Controls"]["Range"], 
+                                        getColor2DImg=idx_callback_names["Data"]["Color2DImg"], 
+                                        stopColor2DImgAcquisition=idx_callback_names["Data"]["StopColor2DImg"],
+                                        getBW2DImg=idx_callback_names["Data"]["BW2DImg"], 
+                                        stopBW2DImgAcquisition=idx_callback_names["Data"]["StopBW2DImg"],
+                                        getDepthMap=idx_callback_names["Data"]["DepthMap"], 
+                                        stopDepthMapAcquisition=idx_callback_names["Data"]["StopDepthMap"],
+                                        getDepthImg=idx_callback_names["Data"]["DepthImg"], 
+                                        stopDepthImgAcquisition=idx_callback_names["Data"]["StopDepthImg"],
+                                        getPointcloud=idx_callback_names["Data"]["Pointcloud"], 
+                                        stopPointcloudAcquisition=idx_callback_names["Data"]["StopPointcloud"],
+                                        getPointcloudImg=idx_callback_names["Data"]["PointcloudImg"], 
+                                        stopPointcloudImgAcquisition=idx_callback_names["Data"]["StopPointcloudImg"],
+                                        getGPSMsg=idx_callback_names["Data"]["GPS"],
+                                        getOdomMsg=idx_callback_names["Data"]["Odom"],
+                                        getHeadingMsg=idx_callback_names["Data"]["Heading"])
+            rospy.loginfo(self.node_name + ": ... IDX interface running")
+            
+            # Now that all camera start-up stuff is processed, we can update the camera from the parameters that have been established
+            self.idx_if.updateFromParamServer()
+
+            # Now start the node
+            rospy.spin()
 
 
     #**********************
