@@ -291,7 +291,7 @@ class ONVIFMgr:
         uuid = "-".join(uuid_tokens)
       uuid = uuid.upper()
       detected_uuids.append(uuid)
-      rospy.logwarn('\tDebug: Detected %s', uuid)
+      #rospy.logwarn('\tDebug: Detected %s', uuid)
             
       # Query this device and add to our tracked list if not previously done
       if uuid not in self.detected_onvifs:
