@@ -7,7 +7,7 @@ This file is part of nepi-engine
 License: 3-clause BSD, see https://opensource.org/licenses/BSD-3-Clause
 ]]
 cmake_minimum_required(VERSION 2.8.3)
-project(nepi_edge_sdk_onvif)
+project(nepi_mgr_onvif)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 add_compile_options(-std=c++11)
@@ -162,8 +162,6 @@ catkin_package(
 #)
 
 catkin_install_python(PROGRAMS
-  scripts/onvif_camera_node.py
-  scripts/onvif_pan_tilt_node.py
   scripts/onvif_mgr.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

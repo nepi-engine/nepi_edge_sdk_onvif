@@ -30,7 +30,7 @@ from nepi_ros_interfaces.srv import OnvifDeviceCfgUpdate, OnvifDeviceCfgUpdateRe
 from nepi_ros_interfaces.srv import OnvifDeviceCfgDelete, OnvifDeviceCfgDeleteResponse
 from nepi_ros_interfaces.srv import OnvifDeviceDriverListQuery, OnvifDeviceDriverListQueryResponse
 OnvifDeviceDriverListQuery
-
+sys.path.append("/opt/nepi/ros/lib/nepi_drivers_idx")
 from onvif_camera_node import DRIVER_SPECIALIZATION_CONSTRUCTORS as CAMERA_DRIVER_DICT
 from onvif_pan_tilt_node import DRIVER_SPECIALIZATION_CONSTRUCTORS as PT_DRIVER_DICT
 
@@ -63,8 +63,9 @@ class ONVIFMgr:
   DEFAULT_NEPI_CONFIG_PATH = "/opt/nepi/ros/etc"
   WSDL_FOLDER = os.path.join(DEFAULT_NEPI_CONFIG_PATH, "onvif/wsdl/")
 
-  NEPI_ROS_ONVIF_PACKAGE = "nepi_edge_sdk_onvif"
+  NEPI_ROS_IDX_PACKAGE = "nepi_drivers_idx"
   NODE_TYPE_ONVIF_CAMERA = "onvif_camera_node.py"
+  NEPI_ROS_PTX_PACKAGE = "nepi_drivers_ptx"
   NODE_TYPE_ONVIF_PTX = "onvif_pan_tilt_node.py"
   
   DEFAULT_DISCOVERY_INTERVAL_S = 10.0
@@ -464,7 +465,7 @@ class ONVIFMgr:
       self.overrideConnectionParams(fully_qualified_node_name, username, password, hostname, port, config['idx_driver'])
 
       # And try to launch the node
-      p = self.startNode(package=self.NEPI_ROS_ONVIF_PACKAGE, node_type=self.NODE_TYPE_ONVIF_CAMERA, node_name=ros_node_name)
+      p = self.startNode(package=self.NEPI_ROS_IDX_PACKAGE, node_type=self.NODE_TYPE_ONVIF_CAMERA, node_name=ros_node_name)
       self.detected_onvifs[uuid]['idx_subproc'] = p
 
     if start_ptx is True:
@@ -474,7 +475,7 @@ class ONVIFMgr:
       self.overrideConnectionParams(fully_qualified_node_name, username, password, hostname, port, config['ptx_driver'])
 
       # And try to launch the node
-      p = self.startNode(package=self.NEPI_ROS_ONVIF_PACKAGE, node_type=self.NODE_TYPE_ONVIF_PTX, node_name=ros_node_name)
+      p = self.startNode(package=self.NEPI_ROS_PTX_PACKAGE, node_type=self.NODE_TYPE_ONVIF_PTX, node_name=ros_node_name)
       self.detected_onvifs[uuid]['ptx_subproc'] = p
 
   def overrideConnectionParams(self, fully_qualified_node_name, username, password, hostname, port, driver_id):

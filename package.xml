@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>nepi_edge_sdk_onvif</name>
+  <name>nepi_mgr_onvif</name>
   <version>0.0.0</version>
   <description>The nepi_edge_sdk_onvif package</description>
 
